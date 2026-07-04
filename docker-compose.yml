@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: control-refugios-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=5455Jve4.
+      - POSTGRES_DB=control_refugios
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  backend:
+    build:
+      context: ./backend
+    container_name: control-refugios-backend
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+      - DATABASE_URL=postgresql://postgres:5455Jve4.@db:5432/control_refugios
+      - JWT_SECRET=super_secret_key_123456789_damnificados_venezuela
+      - NODE_ENV=production
+    depends_on:
+      - db
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: control-refugios-frontend
+    ports:
+      - "8080:80"
+    restart: always
+
+volumes:
+  postgres_data:

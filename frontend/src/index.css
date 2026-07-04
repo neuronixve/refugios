@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #002c60;
+  --color-primary-container: #1b437c;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #8fb1f1;
+  --color-secondary: #5a5f62;
+  --color-secondary-container: #dce0e4;
+  --color-on-secondary: #ffffff;
+  --color-on-secondary-container: #5e6367;
+  --color-tertiary: #4a2300;
+  --color-tertiary-container: #6b3500;
+  --color-on-tertiary: #ffffff;
+  --color-on-tertiary-container: #ed9f63;
+  --color-background: #f8f9ff;
+  --color-on-background: #0d1c2e;
+  --color-surface: #f8f9ff;
+  --color-on-surface: #0d1c2e;
+  --color-surface-variant: #d5e3fc;
+  --color-on-surface-variant: #434750;
+  --color-outline: #737781;
+  --color-outline-variant: #c3c6d1;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #eff4ff;
+  --color-surface-container: #e6eeff;
+  --color-surface-container-high: #dce9ff;
+  --color-surface-container-highest: #d5e3fc;
+  --color-surface-dim: #ccdbf3;
+  --color-surface-bright: #f8f9ff;
+  --color-primary-fixed: #d7e3ff;
+  --color-primary-fixed-dim: #aac7ff;
+  --color-on-primary-fixed: #001b3e;
+  --color-on-primary-fixed-variant: #1f467f;
+  --color-secondary-fixed: #dfe3e7;
+  --color-secondary-fixed-dim: #c3c7cb;
+  --color-on-secondary-fixed: #171c1f;
+  --color-on-secondary-fixed-variant: #43474b;
+  --color-tertiary-fixed: #ffdcc5;
+  --color-tertiary-fixed-dim: #ffb782;
+  --color-on-tertiary-fixed: #301400;
+  --color-on-tertiary-fixed-variant: #6f3803;
+
+  --font-sans: 'Inter', sans-serif;
+
+  --border-radius-DEFAULT: 0.25rem;
+  --border-radius-lg: 0.5rem;
+  --border-radius-xl: 0.75rem;
+  --border-radius-full: 9999px;
+
+  --spacing-gutter: 16px;
+  --spacing-container-margin-desktop: 32px;
+  --spacing-component-gap: 12px;
+  --spacing-container-margin-mobile: 16px;
+  --spacing-base: 8px;
+}
+
+@utility material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  display: inline-block;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  word-wrap: normal;
+  white-space: nowrap;
+  direction: ltr;
+}
+
+@utility custom-scrollbar {
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #c3c6d1;
+    border-radius: 10px;
+  }
+}
+
+@utility bento-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+@utility glass-effect {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(203, 213, 225, 0.5);
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-on-surface);
+}
