@@ -10,7 +10,10 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
-app.use(cors());
+app.use(cors({
+  origin: ['https://venezuelarenacera.com', 'http://localhost:5173'], // Tu web en producción y local
+  credentials: true
+}));
 app.use(express.json());
 
 const fs = require('fs');

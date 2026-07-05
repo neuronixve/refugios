@@ -26,7 +26,7 @@ export default function LogisticsMenus({ token }) {
 
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : 'https://refugios.venexporta.com.ve/api';
+    : 'https://api.venezuelarenacera.com/api';
 
   const DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
   const DAYS_SHORT = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];

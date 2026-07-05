@@ -40,7 +40,7 @@ export default function Configuracion({ token, user }) {
 
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : 'https://refugios.venexporta.com.ve/api';
+    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchBeds();

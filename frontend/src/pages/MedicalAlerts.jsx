@@ -13,7 +13,7 @@ export default function MedicalAlerts({ token }) {
 
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : 'https://refugios.venexporta.com.ve/api';
+    : 'https://api.venezuelarenacera.com/api';
 
   const handleRequestWarehouse = async (itemName, qty) => {
     setMessage('');
