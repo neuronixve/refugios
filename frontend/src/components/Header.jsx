@@ -8,7 +8,7 @@ export default function Header({ user, selectedRefugio }) {
     <header className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-container-margin-desktop bg-white border-b border-outline-variant h-20">
       {/* Brand Logo & Name */}
       <div className="flex items-center gap-4 cursor-pointer" onClick={() => navigate('/welcome')}>
-        <img src="/refugios/logo-ministerio.png" alt="Logo Ministerio" className="h-16 object-contain" />
+        <img src="/logo-ministerio.png" alt="Logo Ministerio" className="h-16 object-contain" />
         <span className="text-headline-md font-bold text-primary dark:text-primary-fixed-dim">Refugios 4.0</span>
       </div>
 
