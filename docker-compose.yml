@@ -3,39 +3,53 @@ version: '3.8'
 services:
   db:
     image: postgres:15-alpine
-    container_name: control-refugios-db
+    restart: unless-stopped
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=5455Jve4Master
-      - POSTGRES_DB=control_refugios
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - postgres_data_v5:/var/lib/postgresql/data
-    restart: always
+      - postgres_data_prod_v1:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - refugios_net
 
   backend:
     build:
       context: ./backend
-    container_name: control-refugios-backend
+    restart: unless-stopped
     ports:
       - "4000:4000"
     environment:
-      - PORT=4000
-      - DATABASE_URL=postgresql://postgres:5455Jve4Master@control-refugios-db:5432/control_refugios
-      - JWT_SECRET=super_secret_key_123456789_damnificados_venezuela
-      - NODE_ENV=production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      DB_SSL: ${DB_SSL:-false}
+      NODE_ENV: production
     depends_on:
-      - db
-    restart: always
+      db:
+        condition: service_healthy
+    networks:
+      - refugios_net
 
   frontend:
     build:
       context: ./frontend
-    container_name: control-refugios-frontend
+    restart: unless-stopped
     ports:
       - "8080:80"
-    restart: always
+    depends_on:
+      - backend
+    networks:
+      - refugios_net
 
 volumes:
-  postgres_data_v5:
+  postgres_data_prod_v1:
+
+networks:
+  refugios_net:
+    driver: bridge
