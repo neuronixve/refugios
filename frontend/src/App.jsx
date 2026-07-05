@@ -87,7 +87,7 @@ const getDefaultPath = (user, refugioId) => {
 export default function App() {
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : '/refugios/api';
+    : 'https://refugios.venexporta.com.ve/api';
 
   const [token, setToken] = useState(localStorage.getItem('token') || '');
   const [user, setUser] = useState(null);
@@ -299,7 +299,7 @@ export default function App() {
   };
 
   return (
-    <BrowserRouter basename="/refugios">
+    <BrowserRouter>
       <div className="min-h-screen bg-background text-on-surface flex flex-col">
         <Header user={user} selectedRefugio={selectedRefugio} />
         

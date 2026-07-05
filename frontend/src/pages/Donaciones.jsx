@@ -29,7 +29,7 @@ export default function Donaciones({ token }) {
 
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : '/refugios/api';
+    : 'https://refugios.venexporta.com.ve/api';
 
   useEffect(() => {
     fetchRecentDonations();
