@@ -6,12 +6,12 @@ services:
     container_name: control-refugios-db
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=5455Jve4.
+      - POSTGRES_PASSWORD=5455Jve4Master
       - POSTGRES_DB=control_refugios
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data_v2:/var/lib/postgresql/data
+      - postgres_data_v3:/var/lib/postgresql/data
     restart: always
 
   backend:
@@ -22,7 +22,7 @@ services:
       - "4000:4000"
     environment:
       - PORT=4000
-      - DATABASE_URL=postgresql://postgres:5455Jve4.@db:5432/control_refugios
+      - DATABASE_URL=postgresql://postgres:5455Jve4Master@control-refugios-db:5432/control_refugios
       - JWT_SECRET=super_secret_key_123456789_damnificados_venezuela
       - NODE_ENV=production
     depends_on:
@@ -38,4 +38,4 @@ services:
     restart: always
 
 volumes:
-  postgres_data_v2:
+  postgres_data_v3:
