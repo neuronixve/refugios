@@ -27,6 +27,15 @@ export default function Inventory({ token, tab }) {
   const [minThreshold, setMinThreshold] = useState(5);
   const [unit, setUnit] = useState('unidades');
 
+  // Consolidated stock modal state
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedConsolidatedItem, setSelectedConsolidatedItem] = useState(null);
+
+  // Search and Pagination States for Warehouse Stock
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
   // Redesigned Delivery Form State
   const [residentId, setResidentId] = useState('');
   const [searchResidentQuery, setSearchResidentQuery] = useState('');
@@ -113,6 +122,36 @@ export default function Inventory({ token, tab }) {
     } catch (err) {
       console.error("Error fetching deliveries:", err);
     }
+  };
+
+  const getConsolidatedInventory = () => {
+    const grouped = {};
+    inventory.forEach(item => {
+      // Exclude items in Cocina deposit if they should only be in Comedor & Logística!
+      if (item.deposito_name && item.deposito_name.toLowerCase().includes('cocina')) {
+        return;
+      }
+
+      const key = `${item.item_name.toLowerCase().trim()}_${item.category.toLowerCase().trim()}`;
+      if (!grouped[key]) {
+        grouped[key] = {
+          item_name: item.item_name,
+          category: item.category,
+          quantity: 0,
+          min_threshold: parseFloat(item.min_threshold) || 0,
+          unit: item.unit || 'Unidades',
+          items: []
+        };
+      }
+      grouped[key].quantity += parseFloat(item.quantity) || 0;
+      grouped[key].items.push(item);
+    });
+    const list = Object.values(grouped);
+    if (!searchQuery.trim()) return list;
+    return list.filter(item => 
+      item.item_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.category.toLowerCase().includes(searchQuery.toLowerCase())
+    );
   };
 
   // Save / Edit stock item
@@ -287,6 +326,14 @@ export default function Inventory({ token, tab }) {
 
   const stockAlerts = inventory.filter(i => i.quantity <= i.min_threshold).length;
 
+  // Pagination calculations for Warehouse Stock
+  const consolidatedList = getConsolidatedInventory();
+  const totalStockItems = consolidatedList.length;
+  const totalStockPages = Math.ceil(totalStockItems / itemsPerPage) || 1;
+  const indexLastStock = currentPage * itemsPerPage;
+  const indexFirstStock = indexLastStock - itemsPerPage;
+  const currentStockList = consolidatedList.slice(indexFirstStock, indexLastStock);
+
   // Filter residents list dynamically according to search input
   const filteredSearchResidents = residents.filter(r => {
     const fullName = `${r.first_name} ${r.last_name}`.toLowerCase();
@@ -375,56 +422,124 @@ export default function Inventory({ token, tab }) {
 
       {/* TAB CONTENT: STOCK */}
       {activeTab === 'stock' && (
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 shadow-xs">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-outline-variant text-on-surface-variant font-bold">
-                  <th className="py-3 px-4">Insumo</th>
-                  <th className="py-3 px-4">Categoría</th>
-                  <th className="py-3 px-4 text-center">Stock Actual</th>
-                  <th className="py-3 px-4 text-center">Mínimo Crítico</th>
-                  <th className="py-3 px-4">Estado</th>
-                  <th className="py-3 px-4 text-right">Acción</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan="6" className="py-8 text-center text-on-surface-variant font-medium">Cargando inventario...</td>
+        <div className="flex flex-col gap-6">
+          {/* Table controls */}
+          <div className="bg-surface-container-lowest border border-outline-variant p-4 rounded-xl flex flex-col md:flex-row justify-between items-center gap-4">
+            <div className="relative w-full md:w-96 flex items-center">
+              <span className="material-symbols-outlined text-on-surface-variant absolute left-3">search</span>
+              <input 
+                type="text" 
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                placeholder="Buscar por nombre o categoría..."
+                className="w-full bg-surface-container-low border border-outline-variant rounded-lg pl-10 pr-4 py-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+              />
+            </div>
+
+            <div className="flex items-center gap-3 text-xs">
+              <span className="text-on-surface-variant font-semibold">Mostrar:</span>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => {
+                  setItemsPerPage(parseInt(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="bg-surface-container border border-outline-variant rounded-lg p-2 text-xs focus:outline-none font-bold"
+              >
+                <option value="10">10 por página</option>
+                <option value="15">15 por página</option>
+                <option value="25">25 por página</option>
+                <option value="50">50 por página</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-outline-variant text-on-surface-variant font-bold">
+                    <th className="py-3 px-4">Insumo</th>
+                    <th className="py-3 px-4">Categoría</th>
+                    <th className="py-3 px-4 text-center">Stock Actual</th>
+                    <th className="py-3 px-4 text-center">Mínimo Crítico</th>
+                    <th className="py-3 px-4">Estado</th>
+                    <th className="py-3 px-4 text-right">Acción</th>
                   </tr>
-                ) : inventory.length > 0 ? (
-                  inventory.map((item) => (
-                    <tr key={item.id} className="border-b border-outline-variant hover:bg-surface-container/30 transition-colors">
-                      <td className="py-3 px-4 font-bold text-primary">{item.item_name}</td>
-                      <td className="py-3 px-4 text-on-surface-variant">{item.category}</td>
-                      <td className="py-3 px-4 text-center font-semibold">{item.quantity} {item.unit}</td>
-                      <td className="py-3 px-4 text-center text-on-surface-variant">{item.min_threshold} {item.unit}</td>
-                      <td className="py-3 px-4">
-                        <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
-                          item.status === 'Stock Suficiente' ? 'bg-success/15 text-success' :
-                          item.status === 'Stock Crítico' ? 'bg-warning/15 text-warning' : 'bg-error/15 text-error'
-                        }`}>
-                          {item.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <button 
-                          onClick={() => handleEditItem(item)}
-                          className="px-2 py-1 bg-primary/10 text-primary rounded font-bold text-[10px] cursor-pointer hover:bg-primary/20"
-                        >
-                          Editar Stock
-                        </button>
-                      </td>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan="6" className="py-8 text-center text-on-surface-variant font-medium">Cargando inventario...</td>
                     </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan="6" className="py-8 text-center text-on-surface-variant font-medium">No hay insumos registrados en el inventario.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  ) : currentStockList.length > 0 ? (
+                    currentStockList.map((item, idx) => {
+                      const status = item.quantity === 0 ? 'Sin Stock' : (item.quantity <= item.min_threshold ? 'Stock Crítico' : 'Stock Suficiente');
+                      return (
+                        <tr key={idx} className="border-b border-outline-variant hover:bg-surface-container/30 transition-colors">
+                          <td className="py-3 px-4 font-bold text-primary">{item.item_name}</td>
+                          <td className="py-3 px-4 text-on-surface-variant">{item.category}</td>
+                          <td className="py-3 px-4 text-center font-bold font-mono text-sm">{item.quantity} {item.unit}</td>
+                          <td className="py-3 px-4 text-center text-on-surface-variant">{item.min_threshold} {item.unit}</td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                              status === 'Stock Suficiente' ? 'bg-success/15 text-success' :
+                              status === 'Stock Crítico' ? 'bg-warning/15 text-warning' : 'bg-error/15 text-error'
+                            }`}>
+                              {status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex justify-end gap-2">
+                              <button 
+                                onClick={() => {
+                                  setSelectedConsolidatedItem(item);
+                                  setShowDetailModal(true);
+                                }}
+                                className="px-2.5 py-1 bg-primary text-white rounded font-bold text-[10px] cursor-pointer hover:bg-primary/90 flex items-center gap-1 shadow-xs border-0"
+                              >
+                                <span className="material-symbols-outlined text-[10px]">visibility</span>
+                                Ver Detalle
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan="6" className="py-8 text-center text-on-surface-variant font-medium">No hay insumos registrados en el inventario.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            {totalStockPages > 1 && (
+              <div className="flex justify-between items-center mt-6 text-xs pt-4 border-t border-outline-variant/40">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="px-4 py-2 bg-surface border border-outline-variant rounded-lg font-bold hover:bg-surface-container disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Anterior
+                </button>
+                <span className="font-semibold text-on-surface-variant">
+                  Página <span className="text-[#0b2347] font-black">{currentPage}</span> de <span className="text-[#0b2347] font-black">{totalStockPages}</span>
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalStockPages))}
+                  disabled={currentPage === totalStockPages}
+                  className="px-4 py-2 bg-surface border border-outline-variant rounded-lg font-bold hover:bg-surface-container disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Siguiente
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -956,6 +1071,67 @@ export default function Inventory({ token, tab }) {
                 className="py-2 px-5 bg-[#0b2347] text-white font-bold rounded-xl text-xs hover:opacity-95 cursor-pointer transition-all"
               >
                 Cerrar Ventana
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Modal: Ver Detalle de Depósitos Consolidados */}
+      {showDetailModal && selectedConsolidatedItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-surface rounded-2xl border border-outline-variant p-6 w-full max-w-lg shadow-lg flex flex-col gap-4 animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center border-b border-outline-variant/60 pb-3">
+              <div>
+                <h3 className="text-sm font-extrabold text-[#0b2347] uppercase">
+                  Detalle de Stock por Depósito
+                </h3>
+                <p className="text-[10px] text-on-surface-variant font-bold mt-0.5">{selectedConsolidatedItem.item_name} ({selectedConsolidatedItem.category})</p>
+              </div>
+              <button 
+                onClick={() => setShowDetailModal(false)}
+                className="text-on-surface-variant hover:bg-surface-container rounded-full p-2 cursor-pointer border-0 bg-transparent flex items-center justify-center"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="overflow-x-auto my-2 border border-outline-variant/60 rounded-xl">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-surface-container-low border-b border-outline-variant text-on-surface-variant font-bold">
+                    <th className="py-2.5 px-4">Depósito</th>
+                    <th className="py-2.5 px-4 text-center">Disponible</th>
+                    <th className="py-2.5 px-4 text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedConsolidatedItem.items.map((dbItem) => (
+                    <tr key={dbItem.id} className="border-b border-outline-variant/30 hover:bg-surface-container-low transition-colors">
+                      <td className="py-2.5 px-4 font-bold text-on-surface">{dbItem.deposito_name || 'Bodega Central'}</td>
+                      <td className="py-2.5 px-4 text-center font-bold font-mono text-[#0b2347] text-sm">{dbItem.quantity} {dbItem.unit}</td>
+                      <td className="py-2.5 px-4 text-right">
+                        <button 
+                          onClick={() => {
+                            setShowDetailModal(false);
+                            handleEditItem(dbItem);
+                          }}
+                          className="px-2 py-1 bg-primary/10 hover:bg-primary/20 text-primary font-bold rounded text-[10px] cursor-pointer border-0"
+                        >
+                          Editar Stock
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-outline-variant/60 pt-4 mt-2">
+              <button 
+                onClick={() => setShowDetailModal(false)}
+                className="px-5 py-2.5 bg-surface border border-outline-variant text-on-surface font-bold rounded-lg text-xs cursor-pointer hover:bg-surface-container"
+              >
+                Cerrar
               </button>
             </div>
           </div>

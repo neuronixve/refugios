@@ -44,7 +44,7 @@ export default function LogisticsPanel({ token }) {
       });
       if (resInv.ok) {
         const invData = await resInv.json();
-        setInventory(invData.filter(i => i.category === 'Alimentos'));
+        setInventory(invData.filter(i => i.category === 'Alimentos' && i.deposito_name && i.deposito_name.toLowerCase().includes('cocina')));
       }
     } catch (err) {
       console.error(err);

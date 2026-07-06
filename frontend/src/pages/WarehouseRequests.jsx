@@ -10,6 +10,11 @@ export default function WarehouseRequests({ token }) {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
+  // Approval modal states
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [selectedSourceDeposito, setSelectedSourceDeposito] = useState('');
+
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
     : 'https://api.venezuelarenacera.com/api';
@@ -43,15 +48,31 @@ export default function WarehouseRequests({ token }) {
 
   const getInventoryQty = (itemName) => {
     if (!itemName) return 0;
-    const item = (inventory || []).find(i => 
-      i.item_name.toLowerCase() === itemName.toLowerCase() ||
-      itemName.toLowerCase().includes(i.item_name.toLowerCase()) ||
-      i.item_name.toLowerCase().includes(itemName.toLowerCase())
-    );
-    return item ? item.quantity : 0;
+    const cleanReqName = itemName.replace(/\s*\(.*?\)\s*/g, '').toLowerCase().trim();
+    return (inventory || [])
+      .filter(i => {
+        if (i.deposito_name && i.deposito_name.toLowerCase().includes('cocina')) {
+          return false;
+        }
+        const cleanItemName = i.item_name.replace(/\s*\(.*?\)\s*/g, '').toLowerCase().trim();
+        return cleanItemName === cleanReqName || cleanReqName.includes(cleanItemName) || cleanItemName.includes(cleanReqName);
+      })
+      .reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
   };
 
-  const handleProcessRequest = async (id, status) => {
+  const getAvailableDepositosForRequest = (req) => {
+    if (!req || !req.item_name) return [];
+    const cleanReqName = req.item_name.replace(/\s*\(.*?\)\s*/g, '').toLowerCase().trim();
+    return (inventory || []).filter(item => {
+      if (!item.deposito_name || item.deposito_name.toLowerCase().includes('cocina')) {
+        return false;
+      }
+      const cleanItemName = item.item_name.replace(/\s*\(.*?\)\s*/g, '').toLowerCase().trim();
+      return cleanItemName === cleanReqName || cleanReqName.includes(cleanItemName) || cleanItemName.includes(cleanReqName);
+    });
+  };
+
+  const handleProcessRequest = async (id, status, depositoId = null) => {
     setError('');
     setMessage('');
     try {
@@ -61,7 +82,10 @@ export default function WarehouseRequests({ token }) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ status })
+        body: JSON.stringify({ 
+          status,
+          deposito_id: depositoId ? parseInt(depositoId) : null
+        })
       });
       if (res.ok) {
         setMessage(`Solicitud #${id} marcada como ${status} correctamente.`);
@@ -146,7 +170,11 @@ export default function WarehouseRequests({ token }) {
                       {req.status === 'Pendiente' ? (
                         <div className="flex justify-end gap-2">
                           <button 
-                            onClick={() => handleProcessRequest(req.id, 'Aprobada')}
+                            onClick={() => {
+                              setSelectedRequest(req);
+                              setSelectedSourceDeposito('');
+                              setShowApproveModal(true);
+                            }}
                             style={{ backgroundColor: '#2e7d32' }}
                             className="px-2.5 py-1.5 text-white font-bold rounded-lg text-[10px] hover:opacity-90 cursor-pointer shadow-2xs"
                           >
@@ -173,6 +201,77 @@ export default function WarehouseRequests({ token }) {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+      {/* Modal: Aprobar Solicitud con Selección de Depósito */}
+      {showApproveModal && selectedRequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-surface rounded-2xl border border-outline-variant p-6 w-full max-w-md shadow-lg flex flex-col gap-4 animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center border-b border-outline-variant/60 pb-3">
+              <div>
+                <h3 className="text-sm font-extrabold text-[#0b2347] uppercase">
+                  Aprobar Solicitud #{selectedRequest.id}
+                </h3>
+                <p className="text-[10px] text-on-surface-variant font-bold mt-0.5">Área Solicitante: {selectedRequest.area}</p>
+              </div>
+              <button 
+                onClick={() => setShowApproveModal(false)}
+                className="text-on-surface-variant hover:bg-surface-container rounded-full p-2 cursor-pointer border-0 bg-transparent flex items-center justify-center"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3 py-2">
+              <div className="bg-surface-container-low p-3 rounded-lg border border-outline-variant/40">
+                <span className="text-[10px] font-black text-on-surface-variant uppercase block mb-1">Insumo Requerido</span>
+                <span className="text-xs font-bold text-on-surface">{selectedRequest.item_name}</span>
+                <span className="text-xs font-mono font-black text-primary block mt-1">Cantidad Solicitada: {selectedRequest.quantity}</span>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-on-surface-variant uppercase block mb-1">Seleccionar Depósito de Origen</label>
+                {getAvailableDepositosForRequest(selectedRequest).length > 0 ? (
+                  <select 
+                    value={selectedSourceDeposito}
+                    onChange={e => setSelectedSourceDeposito(e.target.value)}
+                    className="w-full bg-surface-container border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-bold"
+                    required
+                  >
+                    <option value="">-- Seleccionar Depósito --</option>
+                    {getAvailableDepositosForRequest(selectedRequest).map(dep => (
+                      <option key={dep.id} value={dep.deposito_id}>
+                        {dep.deposito_name || 'Bodega Central'} (Disponible: {dep.quantity} {dep.unit})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="p-3 bg-warning/15 border border-warning/35 text-amber-800 rounded-lg text-xs font-bold">
+                    No se encontró stock registrado de este insumo en los depósitos del Almacén. Se procesará la transferencia creando/buscando el insumo correspondiente.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-outline-variant/60 pt-4 mt-2">
+              <button 
+                onClick={() => setShowApproveModal(false)}
+                className="px-4 py-2 bg-surface border border-outline-variant text-on-surface font-bold rounded-lg text-xs cursor-pointer hover:bg-surface-container"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={() => {
+                  setShowApproveModal(false);
+                  handleProcessRequest(selectedRequest.id, 'Aprobada', selectedSourceDeposito);
+                }}
+                disabled={getAvailableDepositosForRequest(selectedRequest).length > 0 && !selectedSourceDeposito}
+                className="px-4 py-2 bg-[#2e7d32] text-white font-bold rounded-lg text-xs cursor-pointer hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed border-0"
+              >
+                Confirmar y Despachar
+              </button>
+            </div>
           </div>
         </div>
       )}

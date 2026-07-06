@@ -18,6 +18,7 @@ import WarehouseRequests from './pages/WarehouseRequests';
 import LogisticsPanel from './pages/LogisticsPanel';
 import LogisticsMenus from './pages/LogisticsMenus';
 import LogisticsAttendance from './pages/LogisticsAttendance';
+import InventarioCocina from './pages/InventarioCocina';
 import Reports from './pages/Reports';
 import Configuracion from './pages/Configuracion';
 import Residents from './pages/Residents';
@@ -180,9 +181,8 @@ export default function App() {
       <div className="min-h-screen bg-background flex flex-col justify-center items-center px-4">
         <div className="w-full max-w-md bg-surface-container-lowest border border-outline-variant p-8 rounded-2xl shadow-lg flex flex-col gap-6">
           <div className="text-center flex flex-col gap-2">
-            <span className="material-symbols-outlined text-primary text-5xl font-extrabold">domain</span>
-            <h1 className="text-2xl font-extrabold text-primary">Refugios 4.0</h1>
-            <p className="text-xs text-on-surface-variant">Sistema de Gestión y Coordinación Sanitaria de Refugios</p>
+            <img src="/logo-renacera.png" alt="Venezuela Renacerá Logo" className="h-28 object-contain mx-auto" />
+            <p className="text-xs text-on-surface-variant font-medium mt-1">Sistema de Gestión y Coordinación Sanitaria de Campamentos Temporales</p>
           </div>
 
           {error && (
@@ -269,6 +269,7 @@ export default function App() {
   const LogisticsPanelWrapper = () => <LogisticsPanel token={token} />;
   const LogisticsMenusWrapper = () => <LogisticsMenus token={token} />;
   const LogisticsAttendanceWrapper = () => <LogisticsAttendance token={token} />;
+  const InventarioCocinaWrapper = () => <InventarioCocina token={token} user={user} />;
   const ReportsWrapper = () => <Reports token={token} />;
   const ConfiguracionWrapper = () => <Configuracion token={token} user={user} />;
   const ResidentsWrapper = () => <Residents token={token} />;
@@ -334,6 +335,7 @@ export default function App() {
               <Route path="/refugio/:refugioId/comedor/panel" element={<ProtectedRoute element={<LogisticsPanelWrapper />} path="/refugio/:refugioId/comedor/panel" />} />
               <Route path="/refugio/:refugioId/comedor/menus" element={<ProtectedRoute element={<LogisticsMenusWrapper />} path="/refugio/:refugioId/comedor/menus" />} />
               <Route path="/refugio/:refugioId/comedor/asistencia" element={<ProtectedRoute element={<LogisticsAttendanceWrapper />} path="/refugio/:refugioId/comedor/asistencia" />} />
+              <Route path="/refugio/:refugioId/comedor/inventario" element={<ProtectedRoute element={<InventarioCocinaWrapper />} path="/refugio/:refugioId/comedor/inventario" />} />
               
               <Route path="/refugio/:refugioId/logistica" element={<Navigate to={selectedRefugio ? `/refugio/${selectedRefugio.id}/comedor/panel` : '/sedes'} replace />} />
               

@@ -189,7 +189,7 @@ export default function Welcome({ token, user, onSelectRefugio }) {
         fetchStats();
       } else {
         const data = await res.json();
-        setError(data.error || 'Error al guardar los datos del refugio.');
+        setError(data.error || 'Error al guardar los datos del campamento temporal.');
       }
     } catch (err) {
       setError('Error al conectar con el servidor.');
@@ -198,7 +198,7 @@ export default function Welcome({ token, user, onSelectRefugio }) {
 
   const handleDeleteRefugio = async () => {
     if (!selectedRefugioToEdit) return;
-    if (!window.confirm(`¿Estás completamente seguro de eliminar el refugio '${selectedRefugioToEdit.name}'? Se eliminarán todos los residentes, camas y registros de esta sede permanentemente.`)) {
+    if (!window.confirm(`¿Estás completamente seguro de eliminar el campamento temporal '${selectedRefugioToEdit.name}'? Se eliminarán todos los residentes, camas y registros de esta sede permanentemente.`)) {
       return;
     }
     setError('');
@@ -212,7 +212,7 @@ export default function Welcome({ token, user, onSelectRefugio }) {
         fetchRefugios();
         fetchStats();
       } else {
-        setError('Error al eliminar el refugio.');
+        setError('Error al eliminar el campamento temporal.');
       }
     } catch (err) {
       setError('Error al conectar con el servidor.');
@@ -224,7 +224,7 @@ export default function Welcome({ token, user, onSelectRefugio }) {
       {/* Welcome Header */}
       <header className="mb-10">
         <div>
-          <span className="text-primary font-bold text-xs tracking-widest uppercase block">Refugios 4.0</span>
+          <span className="text-primary font-bold text-xs tracking-widest uppercase block">Venezuela Renacerá</span>
           <h1 className="text-3xl font-extrabold text-primary mt-1">Selección de Sede Operativa</h1>
           <p className="text-body-md text-on-surface-variant max-w-2xl mt-2">
             Supervise el estado general de la red o seleccione una sede específica para gestionar sus recursos, ingresos y suministros en tiempo real.
@@ -397,7 +397,7 @@ export default function Welcome({ token, user, onSelectRefugio }) {
                   onSelectRefugio(refugios[0]);
                   setTimeout(() => navigate(`/refugio/${refugios[0].id}/dashboard`), 100);
                 } else {
-                  alert("Por favor, cree un refugio primero.");
+                  alert("Por favor, cree un campamento temporal primero.");
                 }
               }}
               className="px-8 py-4 bg-white text-primary font-bold rounded-xl shadow-md hover:scale-105 transition-transform flex items-center gap-3 cursor-pointer"
@@ -427,7 +427,7 @@ export default function Welcome({ token, user, onSelectRefugio }) {
             
             <form onSubmit={handleCreateOrUpdateRefugio} className="flex flex-col gap-4">
               <div>
-                <label className="text-xs font-bold text-on-surface-variant block mb-1">Nombre del Refugio</label>
+                <label className="text-xs font-bold text-on-surface-variant block mb-1">Nombre del Campamento Temporal</label>
                 <input 
                   type="text" 
                   value={name} 

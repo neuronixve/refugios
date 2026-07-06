@@ -634,7 +634,7 @@ export default function Dashboard({ token, selectedRefugio }) {
                   <div className="bg-warning/10 border border-warning/20 p-4 rounded-xl flex flex-col gap-2">
                     <span className="text-xl font-bold text-warning-variant">{logisticsAlerts.lostDocs} indocumentados</span>
                     <p className="text-[10px] text-on-surface-variant font-medium leading-relaxed">
-                      Residentes que perdieron su cédula física. Coordine un operativo del SAIME en el refugio para agilizar su documentación.
+                      Residentes que perdieron su cédula física. Coordine un operativo del SAIME en el campamento temporal para agilizar su documentación.
                     </p>
                   </div>
                 </div>

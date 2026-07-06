@@ -53,7 +53,7 @@ export default function LogisticsMenus({ token }) {
       });
       if (resInv.ok) {
         const invData = await resInv.json();
-        setInventory(invData.filter(i => i.category === 'Alimentos'));
+        setInventory(invData.filter(i => i.category === 'Alimentos' && i.deposito_name && i.deposito_name.toLowerCase().includes('cocina')));
       }
 
       // 3. Fetch residents

@@ -31,46 +31,22 @@ async function initDb() {
       console.warn('Advertencia: No se encontró el archivo schema.sql');
     }
 
-    // Migración dinámica: Verificar si la columna refugio_id existe en users, sino agregarla
-    const checkCol = await db.query(`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name='users' and column_name='refugio_id'
-    `);
-    if (checkCol.rows.length === 0) {
-      await db.query('ALTER TABLE users ADD COLUMN refugio_id INTEGER REFERENCES refugios(id) ON DELETE SET NULL');
-      console.log('Migración: Columna refugio_id agregada exitosamente a la tabla users.');
-    }
+    // Dynamic alterations (safe to run on every startup)
+    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS refugio_id INTEGER REFERENCES refugios(id) ON DELETE SET NULL');
+    await db.query('ALTER TABLE menus ADD COLUMN IF NOT EXISTS ingredients TEXT');
+    await db.query('ALTER TABLE refugios ADD COLUMN IF NOT EXISTS estado VARCHAR(100)');
+    await db.query('ALTER TABLE incidents ADD COLUMN IF NOT EXISTS involved_residents TEXT DEFAULT \'[]\'');
+    await db.query('ALTER TABLE inventory ADD COLUMN IF NOT EXISTS deposito_id INTEGER REFERENCES depositos(id) ON DELETE SET NULL');
+    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS card_printed BOOLEAN DEFAULT FALSE');
+    await db.query("ALTER TABLE refugios ADD COLUMN IF NOT EXISTS staff_config TEXT DEFAULT '{}'");
+    await db.query("ALTER TABLE menus ADD COLUMN IF NOT EXISTS diets_json TEXT DEFAULT '{}'");
+    await db.query('ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS details TEXT');
 
-    const checkMenuIngs = await db.query(`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name='menus' and column_name='ingredients'
-    `);
-    if (checkMenuIngs.rows.length === 0) {
-      await db.query('ALTER TABLE menus ADD COLUMN ingredients TEXT');
-      console.log('Migración: Columna ingredients agregada exitosamente a la tabla menus.');
-    }
-
-    const checkRefugiosEstado = await db.query(`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name='refugios' and column_name='estado'
-    `);
-    if (checkRefugiosEstado.rows.length === 0) {
-      await db.query('ALTER TABLE refugios ADD COLUMN estado VARCHAR(100)');
-      console.log('Migración: Columna estado agregada exitosamente a la tabla refugios.');
-    }
-
-    const checkIncidentsInvolved = await db.query(`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name='incidents' and column_name='involved_residents'
-    `);
-    if (checkIncidentsInvolved.rows.length === 0) {
-      await db.query('ALTER TABLE incidents ADD COLUMN involved_residents TEXT DEFAULT \'[]\'');
-      console.log('Migración: Columna involved_residents agregada exitosamente a la tabla incidents.');
-    }
+    // Convert inventory quantities to Numeric to support decimals
+    await db.query('ALTER TABLE inventory ALTER COLUMN quantity TYPE NUMERIC(10,2)');
+    await db.query('ALTER TABLE inventory ALTER COLUMN min_threshold TYPE NUMERIC(10,2)');
+    
+    console.log('Migraciones dinámicas verificadas y aplicadas.');
   } catch (err) {
     console.error('Error al inicializar el esquema de base de datos:', err);
   }
@@ -220,7 +196,7 @@ app.get('/api/users', authenticateToken, async (req, res) => {
     if (req.user.role === 'admin') {
       // Superusuario ve todos los usuarios
       queryText = `
-        SELECT u.id, u.name, u.email, u.role, u.refugio_id, r.name as refugio_name 
+        SELECT u.id, u.name, u.email, u.role, u.refugio_id, u.card_printed, r.name as refugio_name 
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
         ORDER BY u.id DESC
@@ -228,7 +204,7 @@ app.get('/api/users', authenticateToken, async (req, res) => {
     } else if (req.user.role === 'supervisor') {
       // Supervisor ve solo los gerentes de cada sede
       queryText = `
-        SELECT u.id, u.name, u.email, u.role, u.refugio_id, r.name as refugio_name 
+        SELECT u.id, u.name, u.email, u.role, u.refugio_id, u.card_printed, r.name as refugio_name 
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
         WHERE u.role = 'gerente'
@@ -237,7 +213,7 @@ app.get('/api/users', authenticateToken, async (req, res) => {
     } else if (req.user.role === 'gerente') {
       // Gerente ve solo el personal asignado a su sede (excluyéndose a sí mismo)
       queryText = `
-        SELECT u.id, u.name, u.email, u.role, u.refugio_id, r.name as refugio_name 
+        SELECT u.id, u.name, u.email, u.role, u.refugio_id, u.card_printed, r.name as refugio_name 
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
         WHERE u.refugio_id = $1 AND u.id != $2
@@ -402,6 +378,23 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Actualizar estado de impresión del carnet del usuario
+app.patch('/api/users/:id/print', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { card_printed } = req.body;
+  try {
+    const result = await db.query(
+      'UPDATE users SET card_printed = $1 WHERE id = $2 RETURNING id, card_printed',
+      [!!card_printed, id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado.' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al actualizar estado de impresión.' });
+  }
+});
+
 // --- RUTAS DE REFUGIOS ---
 
 // Obtener todos los refugios
@@ -420,6 +413,21 @@ app.get('/api/refugios', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al obtener los refugios.' });
+  }
+});
+
+// Obtener un refugio específico
+app.get('/api/refugios/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await db.query('SELECT * FROM refugios WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Refugio no encontrado.' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener el refugio.' });
   }
 });
 
@@ -445,12 +453,12 @@ app.post('/api/refugios', authenticateToken, async (req, res) => {
 // Actualizar refugio
 app.put('/api/refugios/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { name, location, capacity, contact_phone, status, image_url, estado } = req.body;
+  const { name, location, capacity, contact_phone, status, image_url, estado, staff_config } = req.body;
 
   try {
     const result = await db.query(
-      'UPDATE refugios SET name = $1, location = $2, capacity = $3, contact_phone = $4, status = $5, image_url = $6, estado = $7 WHERE id = $8 RETURNING *',
-      [name, location, capacity, contact_phone, status, image_url || null, estado || null, id]
+      'UPDATE refugios SET name = $1, location = $2, capacity = $3, contact_phone = $4, status = $5, image_url = $6, estado = $7, staff_config = $8 WHERE id = $9 RETURNING *',
+      [name, location, capacity, contact_phone, status, image_url || null, estado || null, staff_config || '{}', id]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Refugio no encontrado.' });
@@ -802,7 +810,7 @@ app.get('/api/refugios/:refugio_id/inventory', authenticateToken, async (req, re
   const { refugio_id } = req.params;
   try {
     const result = await db.query(
-      'SELECT * FROM inventory WHERE refugio_id = $1 ORDER BY category ASC, item_name ASC',
+      'SELECT i.*, d.name as deposito_name FROM inventory i LEFT JOIN depositos d ON i.deposito_id = d.id WHERE i.refugio_id = $1 ORDER BY i.category ASC, i.item_name ASC',
       [refugio_id]
     );
     res.json(result.rows);
@@ -814,22 +822,35 @@ app.get('/api/refugios/:refugio_id/inventory', authenticateToken, async (req, re
 
 app.post('/api/refugios/:refugio_id/inventory', authenticateToken, async (req, res) => {
   const { refugio_id } = req.params;
-  const { item_name, category, quantity, min_threshold, unit } = req.body;
+  const { id, item_name, category, quantity, min_threshold, unit, deposito_id } = req.body;
   if (!item_name || !category || quantity === undefined) {
     return res.status(400).json({ error: 'Insumo, categoría y cantidad son requeridos.' });
   }
 
   try {
-    const status = quantity === 0 ? 'Sin Stock' : (quantity <= min_threshold ? 'Stock Crítico' : 'Stock Suficiente');
-    const result = await db.query(
-      `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (id) DO UPDATE 
-       SET item_name = EXCLUDED.item_name, category = EXCLUDED.category, quantity = EXCLUDED.quantity, 
-           min_threshold = EXCLUDED.min_threshold, unit = EXCLUDED.unit, status = EXCLUDED.status, updated_at = NOW()
-       RETURNING *`,
-      [refugio_id, item_name, category, quantity, min_threshold || 5, unit || 'unidades', status]
-    );
+    const qtyVal = parseFloat(quantity) || 0;
+    const minVal = parseFloat(min_threshold) || 0;
+    const status = qtyVal === 0 ? 'Sin Stock' : (qtyVal <= minVal ? 'Stock Crítico' : 'Stock Suficiente');
+    
+    let result;
+    if (id) {
+      result = await db.query(
+        `INSERT INTO inventory (id, refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (id) DO UPDATE 
+         SET item_name = EXCLUDED.item_name, category = EXCLUDED.category, quantity = EXCLUDED.quantity, 
+             min_threshold = EXCLUDED.min_threshold, unit = EXCLUDED.unit, status = EXCLUDED.status, deposito_id = EXCLUDED.deposito_id, updated_at = NOW()
+         RETURNING *`,
+        [parseInt(id), parseInt(refugio_id), item_name, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null]
+      );
+    } else {
+      result = await db.query(
+        `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *`,
+        [parseInt(refugio_id), item_name, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null]
+      );
+    }
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -917,20 +938,35 @@ app.get('/api/refugios/:refugio_id/menus', authenticateToken, async (req, res) =
 
 app.post('/api/refugios/:refugio_id/menus', authenticateToken, async (req, res) => {
   const { refugio_id } = req.params;
-  const { day_of_week, meal_type, description, ingredients } = req.body;
+  const { day_of_week, meal_type, description, ingredients, diets_json } = req.body;
   try {
     const result = await db.query(
-      `INSERT INTO menus (refugio_id, day_of_week, meal_type, description, ingredients)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO menus (refugio_id, day_of_week, meal_type, description, ingredients, diets_json)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (refugio_id, day_of_week, meal_type) DO UPDATE 
-       SET description = EXCLUDED.description, ingredients = EXCLUDED.ingredients
+       SET description = EXCLUDED.description, ingredients = EXCLUDED.ingredients, diets_json = EXCLUDED.diets_json
        RETURNING *`,
-      [refugio_id, day_of_week, meal_type, description, ingredients]
+      [refugio_id, day_of_week, meal_type, description, ingredients, diets_json || '{}']
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al registrar menú.' });
+  }
+});
+
+app.delete('/api/refugios/:refugio_id/menus', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  const { day_of_week, meal_type } = req.query;
+  try {
+    await db.query(
+      'DELETE FROM menus WHERE refugio_id = $1 AND day_of_week = $2 AND meal_type = $3',
+      [parseInt(refugio_id), day_of_week, meal_type]
+    );
+    res.json({ message: 'Menú eliminado correctamente.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al eliminar menú.' });
   }
 });
 
@@ -1021,16 +1057,36 @@ app.post('/api/donations', authenticateToken, async (req, res) => {
 
     // 2. If donation is assigned to a shelter, sync items to inventory
     if (refugio_id) {
+      // Resolve deposito_id based on destination_warehouse name
+      let deposito_id = null;
+      if (destination_warehouse) {
+        const depRes = await db.query(
+          'SELECT id FROM depositos WHERE refugio_id = $1 AND LOWER(name) = LOWER($2)',
+          [refugio_id, destination_warehouse.trim()]
+        );
+        if (depRes.rows.length > 0) {
+          deposito_id = depRes.rows[0].id;
+        } else {
+          const createDep = await db.query(
+            'INSERT INTO depositos (refugio_id, name, capacity_percent) VALUES ($1, $2, 0) RETURNING id',
+            [refugio_id, destination_warehouse.trim()]
+          );
+          deposito_id = createDep.rows[0].id;
+        }
+      }
+
       for (const item of items) {
         const item_name = item.name;
         const category = item.category || 'Donación';
         const quantity = parseInt(item.quantity) || 0;
         const unit = item.unit || 'unidades';
 
-        // Check if item exists in inventory for this refugio (case-insensitive name match)
+        // Check if item exists in inventory for this refugio and depósito (case-insensitive name match)
         const checkItem = await db.query(
-          'SELECT id, quantity, min_threshold FROM inventory WHERE refugio_id = $1 AND LOWER(item_name) = LOWER($2) AND category = $3',
-          [refugio_id, item_name, category]
+          `SELECT id, quantity, min_threshold FROM inventory 
+           WHERE refugio_id = $1 AND LOWER(item_name) = LOWER($2) AND category = $3 
+           AND (deposito_id = $4 OR (deposito_id IS NULL AND $4 IS NULL))`,
+          [refugio_id, item_name, category, deposito_id]
         );
 
         if (checkItem.rows.length > 0) {
@@ -1051,9 +1107,9 @@ app.post('/api/donations', authenticateToken, async (req, res) => {
           else if (quantity < 5) status = 'Stock Crítico';
 
           await db.query(
-            `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status)
-             VALUES ($1, $2, $3, $4, 5, $5, $6)`,
-            [refugio_id, item_name, category, quantity, unit, status]
+            `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id)
+             VALUES ($1, $2, $3, $4, 5, $5, $6, $7)`,
+            [refugio_id, item_name, category, quantity, unit, status, deposito_id]
           );
         }
       }
@@ -1404,15 +1460,15 @@ app.get('/api/refugios/:refugio_id/warehouse-requests', authenticateToken, async
 // Crear solicitud
 app.post('/api/refugios/:refugio_id/warehouse-requests', authenticateToken, async (req, res) => {
   const { refugio_id } = req.params;
-  const { area, item_name, quantity } = req.body;
+  const { area, item_name, quantity, details } = req.body;
   if (!area || !item_name || !quantity) {
     return res.status(400).json({ error: 'Área, insumo y cantidad son requeridos.' });
   }
   try {
     const result = await db.query(
-      `INSERT INTO warehouse_requests (refugio_id, area, item_name, quantity)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [parseInt(refugio_id), area, item_name, parseInt(quantity)]
+      `INSERT INTO warehouse_requests (refugio_id, area, item_name, quantity, details)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [parseInt(refugio_id), area, item_name, parseInt(quantity), details || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1421,25 +1477,128 @@ app.post('/api/refugios/:refugio_id/warehouse-requests', authenticateToken, asyn
   }
 });
 
+// Resetear comedor para pruebas
+app.post('/api/refugios/:refugio_id/reset-kitchen-testing', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  try {
+    await db.query('DELETE FROM menus WHERE refugio_id = $1', [parseInt(refugio_id)]);
+    await db.query("DELETE FROM warehouse_requests WHERE refugio_id = $1 AND area = 'Comedor'", [parseInt(refugio_id)]);
+    
+    const cocDepRes = await db.query("SELECT id FROM depositos WHERE name ILIKE '%cocina%' AND refugio_id = $1", [parseInt(refugio_id)]);
+    if (cocDepRes.rows.length > 0) {
+      const cocinaDepId = cocDepRes.rows[0].id;
+      await db.query('DELETE FROM inventory WHERE refugio_id = $1 AND category = $2 AND deposito_id = $3', [parseInt(refugio_id), 'Alimentos', cocinaDepId]);
+    } else {
+      await db.query('DELETE FROM inventory WHERE refugio_id = $1 AND category = $2', [parseInt(refugio_id), 'Alimentos']);
+    }
+    res.json({ message: 'Comedor reiniciado exitosamente para pruebas.' });
+  } catch (err) {
+    console.error("Error al reiniciar comedor:", err);
+    res.status(500).json({ error: 'Error al reiniciar comedor.' });
+  }
+});
+
 // Procesar solicitud (Aprobar / Rechazar)
 app.put('/api/refugios/:refugio_id/warehouse-requests/:id', authenticateToken, async (req, res) => {
   const { refugio_id, id } = req.params;
-  const { status } = req.body; // 'Aprobada', 'Rechazada'
+  const { status, deposito_id } = req.body; // 'Aprobada', 'Rechazada', optional dispatch source deposito_id
   try {
     if (status === 'Aprobada') {
       const reqResult = await db.query('SELECT * FROM warehouse_requests WHERE id = $1 AND refugio_id = $2', [parseInt(id), parseInt(refugio_id)]);
       if (reqResult.rows.length > 0) {
         const request = reqResult.rows[0];
-        // Deducir del inventario
-        await db.query(
-          `UPDATE inventory 
-           SET quantity = GREATEST(0, quantity - $1) 
-           WHERE refugio_id = $2 AND item_name ILIKE $3`,
-          [request.quantity, parseInt(refugio_id), `%${request.item_name}%`]
-        );
+
+        // 1. Find or create Cocina depósito
+        let cocinaDepId = null;
+        const cocDepRes = await db.query("SELECT id FROM depositos WHERE name ILIKE '%cocina%' AND refugio_id = $1 LIMIT 1", [parseInt(refugio_id)]);
+        if (cocDepRes.rows.length > 0) {
+          cocinaDepId = cocDepRes.rows[0].id;
+        } else {
+          const newDep = await db.query(
+            "INSERT INTO depositos (refugio_id, name, description, capacity_percent) VALUES ($1, 'Cocina', 'Depósito local de cocina para raciones diarias', 100) RETURNING id",
+            [parseInt(refugio_id)]
+          );
+          cocinaDepId = newDep.rows[0].id;
+        }
+
+        // 2. Prepare items to process (supports both consolidated details and single item)
+        const itemsToProcess = [];
+        if (request.details) {
+          try {
+            const parsed = JSON.parse(request.details);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              itemsToProcess.push(...parsed);
+            }
+          } catch (e) {
+            console.error("Error parsing details:", e);
+          }
+        }
+        if (itemsToProcess.length === 0) {
+          itemsToProcess.push({
+            name: request.item_name,
+            quantity: request.quantity,
+            unit: request.unit || 'Unidades'
+          });
+        }
+
+        // 3. Process each item transfer
+        for (const item of itemsToProcess) {
+          const cleanName = item.name.replace(/\s*\(.*?\)\s*/g, '').trim();
+
+          // Find the actual warehouse item to deduct from (and get its unit/category)
+          let warehouseItem = null;
+          let findQuery = `SELECT * FROM inventory WHERE refugio_id = $1 AND (item_name ILIKE $2 OR item_name ILIKE $3 OR $4 ILIKE '%' || item_name || '%') AND (deposito_id != $5 OR deposito_id IS NULL)`;
+          let findParams = [parseInt(refugio_id), `%${cleanName}%`, `%${item.name}%`, item.name, cocinaDepId];
+          
+          if (deposito_id) {
+            findQuery += ` AND deposito_id = $6`;
+            findParams.push(parseInt(deposito_id));
+          }
+          findQuery += ` ORDER BY quantity DESC LIMIT 1`;
+
+          const whItemRes = await db.query(findQuery, findParams);
+          if (whItemRes.rows.length > 0) {
+            warehouseItem = whItemRes.rows[0];
+          }
+
+          const targetUnit = warehouseItem ? warehouseItem.unit : (item.unit || 'Unidades');
+          const targetCategory = warehouseItem ? warehouseItem.category : 'Alimentos';
+
+          // Deduct from warehouse
+          if (warehouseItem) {
+            await db.query(
+              `UPDATE inventory 
+               SET quantity = GREATEST(0, quantity - $1),
+                   status = CASE WHEN GREATEST(0, quantity - $1) = 0 THEN 'Sin Stock' WHEN GREATEST(0, quantity - $1) <= min_threshold THEN 'Stock Crítico' ELSE 'Stock Suficiente' END
+               WHERE id = $2`,
+              [parseFloat(item.quantity) || 0, warehouseItem.id]
+            );
+          }
+
+          // Add to kitchen
+          const existKitchen = await db.query(
+            "SELECT id, quantity FROM inventory WHERE refugio_id = $1 AND (item_name ILIKE $2 OR item_name ILIKE $3 OR $4 ILIKE '%' || item_name || '%') AND deposito_id = $5",
+            [parseInt(refugio_id), `%${cleanName}%`, `%${item.name}%`, item.name, cocinaDepId]
+          );
+
+          if (existKitchen.rows.length > 0) {
+            await db.query(
+              "UPDATE inventory SET quantity = quantity + $1, status = CASE WHEN (quantity + $1) <= min_threshold THEN 'Stock Crítico' ELSE 'Stock Suficiente' END, updated_at = NOW() WHERE id = $2",
+              [parseFloat(item.quantity) || 0, existKitchen.rows[0].id]
+            );
+          } else {
+            const qtyVal = parseFloat(item.quantity) || 0;
+            const statusStr = qtyVal <= 5 ? 'Stock Crítico' : 'Stock Suficiente';
+            await db.query(
+              `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id)
+               VALUES ($1, $2, $3, $4, 5, $5, $6, $7)`,
+              [parseInt(refugio_id), cleanName, targetCategory, qtyVal, targetUnit, statusStr, cocinaDepId]
+            );
+          }
+        }
       }
     }
-    
+
     const result = await db.query(
       'UPDATE warehouse_requests SET status = $1 WHERE id = $2 AND refugio_id = $3 RETURNING *',
       [status, parseInt(id), parseInt(refugio_id)]

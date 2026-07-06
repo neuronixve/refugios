@@ -186,6 +186,7 @@ export default function Residents({ token }) {
   };
 
   const filteredResidents = residents.filter(res => {
+    if (res.status !== 'Activo') return false;
     const fullName = `${res.first_name} ${res.last_name}`.toLowerCase();
     const doc = (res.document_id || '').toLowerCase();
     const query = searchQuery.toLowerCase();
@@ -435,7 +436,7 @@ export default function Residents({ token }) {
   };
 
   const handleRetireResident = async (resident) => {
-    const confirmMessage = `¿Estás seguro de egresar (eliminar) a ${resident.first_name} ${resident.last_name} del refugio? Esta acción liberará la cama y cambiará su estado a 'Retirado'.`;
+    const confirmMessage = `¿Estás seguro de egresar (eliminar) a ${resident.first_name} ${resident.last_name} del campamento temporal? Esta acción liberará la cama y cambiará su estado a 'Retirado'.`;
     if (!window.confirm(confirmMessage)) return;
 
     setError('');
@@ -477,7 +478,7 @@ export default function Residents({ token }) {
       });
 
       if (res.ok) {
-        setMessage('Residente eliminado (egresado) del refugio exitosamente.');
+        setMessage('Residente eliminado (egresado) del campamento temporal exitosamente.');
         fetchResidentsAndBeds();
       } else {
         setError('Error al actualizar el estado del residente.');
@@ -1191,7 +1192,7 @@ export default function Residents({ token }) {
                 <span className="text-[10px] text-primary block uppercase font-bold mb-3">Asistencia Familiar (Solo Jefe de Familia)</span>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Personas a cargo en el refugio</label>
+                    <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Personas a cargo en el campamento temporal</label>
                     <input type="number" value={totalPeopleUnderCharge} onChange={e => setTotalPeopleUnderCharge(parseInt(e.target.value) || 0)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2 text-xs focus:outline-none" />
                   </div>
                   <div>

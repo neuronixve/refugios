@@ -6,10 +6,9 @@ export default function Header({ user, selectedRefugio }) {
 
   return (
     <header className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-container-margin-desktop bg-white border-b border-outline-variant h-20">
-      {/* Brand Logo & Name */}
+      {/* Brand Logo (Venezuela Renacerá) */}
       <div className="flex items-center gap-4 cursor-pointer" onClick={() => navigate('/welcome')}>
-        <img src="/logo-ministerio.png" alt="Logo Ministerio" className="h-16 object-contain" />
-        <span className="text-headline-md font-bold text-primary dark:text-primary-fixed-dim">Refugios 4.0</span>
+        <img src="/logo-renacera.png" alt="Logo Venezuela Renacerá" className="h-16 object-contain" />
       </div>
 
       {/* Global Search (Active only when inside a specific Sede) */}
@@ -26,8 +25,9 @@ export default function Header({ user, selectedRefugio }) {
         )}
       </div>
 
-      {/* User Info & Actions */}
+      {/* User Info, Actions & Ministry Logo */}
       <div className="flex items-center gap-4">
+        <img src="/logo-ministerio.png" alt="Logo Ministerio" className="h-12 object-contain mr-2" />
         {user && (
           <div className="hidden sm:flex flex-col text-right">
             <span className="text-body-sm font-bold text-on-surface">{user.name}</span>

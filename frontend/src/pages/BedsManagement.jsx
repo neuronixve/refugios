@@ -355,7 +355,7 @@ export default function BedsManagement({ token }) {
       <header className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-extrabold text-primary">Gestión de Espacios y Camas</h2>
-          <p className="text-xs text-on-surface-variant">Gestione la capacidad y disponibilidad de las áreas del refugio.</p>
+          <p className="text-xs text-on-surface-variant">Gestione la capacidad y disponibilidad de las áreas del campamento temporal.</p>
         </div>
         
         {!selectedSpace ? (

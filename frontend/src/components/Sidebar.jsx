@@ -33,7 +33,7 @@ export default function Sidebar({ user, selectedRefugio, onLogout }) {
       {/* Brand & Sede Context */}
       <div className="flex flex-col gap-2 mb-6">
         <div className="px-2">
-          <h2 className="text-xs font-black text-primary uppercase tracking-wider">Refugios 4.0</h2>
+          <h2 className="text-xs font-black text-primary uppercase tracking-wider">Venezuela Renacerá</h2>
           {selectedRefugio ? (
             <div className="mt-2 bg-primary-container/20 border border-primary/20 rounded-lg p-3">
               <span className="text-[10px] font-semibold text-primary block">Sede Activa:</span>
@@ -205,6 +205,10 @@ export default function Sidebar({ user, selectedRefugio, onLogout }) {
                     <NavLink to={`/refugio/${selectedRefugio.id}/comedor/asistencia`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
                       <span className="material-symbols-outlined text-xs">qr_code_scanner</span>
                       <span>Asistencia de Comedor</span>
+                    </NavLink>
+                    <NavLink to={`/refugio/${selectedRefugio.id}/comedor/inventario`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
+                      <span className="material-symbols-outlined text-xs">kitchen</span>
+                      <span>Inventario de Cocina</span>
                     </NavLink>
                   </div>
                 )}

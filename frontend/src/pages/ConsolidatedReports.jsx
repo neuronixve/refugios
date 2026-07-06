@@ -872,7 +872,7 @@ export default function ConsolidatedReports({ token }) {
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-outline-variant text-on-surface-variant font-bold bg-surface/30">
-                    <th className="py-2.5 px-3 rounded-l-lg">Nombre del Refugio</th>
+                    <th className="py-2.5 px-3 rounded-l-lg">Nombre del Campamento Temporal</th>
                     <th className="py-2.5 px-3">Ubicación / Estado</th>
                     <th className="py-2.5 px-3 text-center">Censo Activo</th>
                     <th className="py-2.5 px-3 text-center">Ocupación Camas</th>
