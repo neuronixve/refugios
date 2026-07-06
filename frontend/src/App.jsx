@@ -13,6 +13,7 @@ import BedsManagement from './pages/BedsManagement';
 import Triage from './pages/Triage';
 import MedicalAlerts from './pages/MedicalAlerts';
 import InventarioSalud from './pages/InventarioSalud';
+import MedicationDelivery from './pages/MedicationDelivery';
 import MedicalReport from './pages/MedicalReport';
 import Inventory from './pages/Inventory';
 import WarehouseRequests from './pages/WarehouseRequests';
@@ -267,6 +268,7 @@ export default function App() {
   const TriageWrapper = () => <Triage token={token} />;
   const MedicalAlertsWrapper = () => <MedicalAlerts token={token} />;
   const InventarioSaludWrapper = () => <InventarioSalud token={token} />;
+  const MedicationDeliveryWrapper = () => <MedicationDelivery token={token} />;
   const MedicalReportWrapper = () => <MedicalReport token={token} />;
   const InventoryWrapper = () => <Inventory token={token} />;
   const WarehouseRequestsWrapper = () => <WarehouseRequests token={token} />;
@@ -333,6 +335,7 @@ export default function App() {
               <Route path="/refugio/:refugioId/medico/triaje" element={<ProtectedRoute element={<TriageWrapper />} path="/refugio/:refugioId/medico/triaje" />} />
               <Route path="/refugio/:refugioId/medico/insumos" element={<ProtectedRoute element={<MedicalAlertsWrapper />} path="/refugio/:refugioId/medico/insumos" />} />
               <Route path="/refugio/:refugioId/medico/inventario" element={<ProtectedRoute element={<InventarioSaludWrapper />} path="/refugio/:refugioId/medico/inventario" />} />
+              <Route path="/refugio/:refugioId/medico/entrega-medicamentos" element={<ProtectedRoute element={<MedicationDeliveryWrapper />} path="/refugio/:refugioId/medico/entrega-medicamentos" />} />
               <Route path="/refugio/:refugioId/medico/reporte" element={<ProtectedRoute element={<MedicalReportWrapper />} path="/refugio/:refugioId/medico/reporte" />} />
               
               <Route path="/refugio/:refugioId/triaje" element={<Navigate to={selectedRefugio ? `/refugio/${selectedRefugio.id}/medico/triaje` : '/sedes'} replace />} />

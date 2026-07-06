@@ -134,6 +134,10 @@ export default function Sidebar({ user, selectedRefugio, onLogout, mobileOpen = 
                       <span className="material-symbols-outlined text-xs">inventory_2</span>
                       <span>Inventario de Salud</span>
                     </NavLink>
+                    <NavLink to={`/refugio/${selectedRefugio.id}/medico/entrega-medicamentos`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
+                      <span className="material-symbols-outlined text-xs">medication_liquid</span>
+                      <span>Entrega de Medicamentos</span>
+                    </NavLink>
                     <NavLink to={`/refugio/${selectedRefugio.id}/medico/reporte`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
                       <span className="material-symbols-outlined text-xs">assignment</span>
                       <span>Reporte de Salud</span>

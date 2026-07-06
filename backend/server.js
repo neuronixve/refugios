@@ -43,6 +43,23 @@ async function initDb() {
     await db.query("ALTER TABLE menus ADD COLUMN IF NOT EXISTS diets_json TEXT DEFAULT '{}'");
     await db.query('ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS details TEXT');
     await db.query("ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS unit VARCHAR(20) DEFAULT 'Unidades'");
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS medication_deliveries (
+        id SERIAL PRIMARY KEY,
+        refugio_id INTEGER REFERENCES refugios(id) ON DELETE CASCADE,
+        resident_id INTEGER REFERENCES damnificados(id) ON DELETE CASCADE,
+        inventory_item_id INTEGER REFERENCES inventory(id) ON DELETE SET NULL,
+        medication_index INTEGER,
+        medication_name VARCHAR(150) NOT NULL,
+        dose TEXT,
+        quantity NUMERIC(10,2) NOT NULL,
+        unit VARCHAR(30) DEFAULT 'Dosis',
+        delivery_frequency VARCHAR(30) DEFAULT 'Única',
+        notes TEXT,
+        delivered_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        delivered_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
 
     // Convert inventory quantities to Numeric to support decimals
     await db.query('ALTER TABLE inventory ALTER COLUMN quantity TYPE NUMERIC(10,2)');
@@ -954,6 +971,164 @@ app.get('/api/refugios/:refugio_id/deliveries', authenticateToken, async (req, r
   } catch (err) {
     console.error("Error al obtener entregas:", err);
     res.status(500).json({ error: 'Error al obtener historial de entregas.' });
+  }
+});
+
+app.get('/api/refugios/:refugio_id/medication-deliveries', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  const { resident_id } = req.query;
+
+  try {
+    const params = [parseInt(refugio_id)];
+    let where = 'WHERE md.refugio_id = $1';
+    if (resident_id) {
+      params.push(parseInt(resident_id));
+      where += ` AND md.resident_id = $${params.length}`;
+    }
+
+    const result = await db.query(
+      `SELECT md.*, d.first_name, d.last_name, d.document_id, i.item_name as inventory_item_name, u.name as delivered_by_name
+       FROM medication_deliveries md
+       JOIN damnificados d ON md.resident_id = d.id
+       LEFT JOIN inventory i ON md.inventory_item_id = i.id
+       LEFT JOIN users u ON md.delivered_by = u.id
+       ${where}
+       ORDER BY md.delivered_at DESC`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error al obtener entregas de medicamentos:', err);
+    res.status(500).json({ error: 'Error al obtener historial de medicamentos.' });
+  }
+});
+
+app.post('/api/refugios/:refugio_id/medication-deliveries', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  const {
+    resident_id,
+    inventory_item_id,
+    medication_index,
+    medication_name,
+    dose,
+    quantity,
+    unit,
+    delivery_frequency,
+    notes
+  } = req.body;
+
+  const qty = parseFloat(quantity);
+  const medicationIndexValue = medication_index === undefined || medication_index === null || medication_index === ''
+    ? null
+    : parseInt(medication_index);
+  if (!resident_id || !inventory_item_id || !medication_name || !Number.isFinite(qty) || qty <= 0) {
+    return res.status(400).json({ error: 'Residente, medicamento de inventario, tratamiento y cantidad válida son requeridos.' });
+  }
+
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const residentRes = await client.query(
+      'SELECT id, first_name, last_name, special_needs FROM damnificados WHERE id = $1 AND refugio_id = $2 AND status = $3',
+      [parseInt(resident_id), parseInt(refugio_id), 'Activo']
+    );
+    if (residentRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Residente activo no encontrado en esta sede.' });
+    }
+
+    let treatment = null;
+    try {
+      const meta = JSON.parse(residentRes.rows[0].special_needs || '{}');
+      const meds = Array.isArray(meta.medications) ? meta.medications : [];
+      treatment = Number.isInteger(medicationIndexValue) ? meds[medicationIndexValue] : null;
+      if (!treatment) {
+        treatment = meds.find(m => (m.name || '').toLowerCase() === String(medication_name).toLowerCase()) || null;
+      }
+    } catch {
+      treatment = null;
+    }
+
+    const totalRequired = treatment ? parseFloat(treatment.totalQuantity) : NaN;
+    if (Number.isFinite(totalRequired) && totalRequired > 0) {
+      const deliveredParams = [parseInt(refugio_id), parseInt(resident_id), medication_name];
+      let deliveredWhere = 'refugio_id = $1 AND resident_id = $2 AND medication_name = $3';
+      if (Number.isInteger(medicationIndexValue)) {
+        deliveredParams.push(medicationIndexValue);
+        deliveredWhere += ` AND medication_index = $${deliveredParams.length}`;
+      }
+      const deliveredRes = await client.query(
+        `SELECT COALESCE(SUM(quantity), 0)::numeric as delivered
+         FROM medication_deliveries
+         WHERE ${deliveredWhere}`,
+        deliveredParams
+      );
+      const alreadyDelivered = parseFloat(deliveredRes.rows[0].delivered) || 0;
+      if (alreadyDelivered + qty > totalRequired) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: `La entrega supera lo indicado para este tratamiento. Indicado: ${totalRequired}, entregado: ${alreadyDelivered}, saldo: ${Math.max(totalRequired - alreadyDelivered, 0)}.`
+        });
+      }
+    }
+
+    const inventoryRes = await client.query(
+      'SELECT id, item_name, quantity, min_threshold, unit FROM inventory WHERE id = $1 AND refugio_id = $2 FOR UPDATE',
+      [parseInt(inventory_item_id), parseInt(refugio_id)]
+    );
+    if (inventoryRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Medicamento no encontrado en el inventario de salud.' });
+    }
+
+    const stock = parseFloat(inventoryRes.rows[0].quantity) || 0;
+    if (stock < qty) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Stock insuficiente. Disponible: ${stock} ${inventoryRes.rows[0].unit || unit || 'unidades'}.` });
+    }
+
+    const result = await client.query(
+      `INSERT INTO medication_deliveries
+       (refugio_id, resident_id, inventory_item_id, medication_index, medication_name, dose, quantity, unit, delivery_frequency, notes, delivered_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING *`,
+      [
+        parseInt(refugio_id),
+        parseInt(resident_id),
+        parseInt(inventory_item_id),
+        Number.isInteger(medicationIndexValue) ? medicationIndexValue : null,
+        medication_name,
+        dose || treatment?.dose || null,
+        qty,
+        unit || inventoryRes.rows[0].unit || 'Dosis',
+        delivery_frequency || treatment?.deliveryFrequency || 'Única',
+        notes || null,
+        req.user.id
+      ]
+    );
+
+    await client.query(
+      `UPDATE inventory
+       SET quantity = quantity - $1,
+           status = CASE
+             WHEN quantity - $1 <= 0 THEN 'Sin Stock'
+             WHEN quantity - $1 <= min_threshold THEN 'Stock Crítico'
+             ELSE 'Stock Suficiente'
+           END,
+           updated_at = NOW()
+       WHERE id = $2`,
+      [qty, parseInt(inventory_item_id)]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error al registrar entrega de medicamento:', err);
+    res.status(500).json({ error: 'Error al registrar entrega de medicamento.' });
+  } finally {
+    client.release();
   }
 });
 

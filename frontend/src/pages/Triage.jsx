@@ -33,6 +33,10 @@ export default function Triage({ token }) {
   const [medDose, setMedDose] = useState('');
   const [medDate, setMedDate] = useState('');
   const [medEndDate, setMedEndDate] = useState('');
+  const [medTotalQuantity, setMedTotalQuantity] = useState('');
+  const [medUnit, setMedUnit] = useState('Dosis');
+  const [medDeliveryFrequency, setMedDeliveryFrequency] = useState('Única');
+  const [medNotes, setMedNotes] = useState('');
 
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -193,7 +197,11 @@ export default function Triage({ token }) {
       name: medName,
       dose: medDose,
       date: medDate || new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }),
-      endDate: medEndDate || 'Indefinido'
+      endDate: medEndDate || 'Indefinido',
+      totalQuantity: medTotalQuantity,
+      unit: medUnit,
+      deliveryFrequency: medDeliveryFrequency,
+      notes: medNotes
     };
     const updatedMeta = {
       ...meta,
@@ -204,6 +212,10 @@ export default function Triage({ token }) {
     setMedDose('');
     setMedDate('');
     setMedEndDate('');
+    setMedTotalQuantity('');
+    setMedUnit('Dosis');
+    setMedDeliveryFrequency('Única');
+    setMedNotes('');
     setShowMedModal(false);
   };
 
@@ -377,6 +389,12 @@ export default function Triage({ token }) {
                       <div>
                         <h4 className="font-bold text-on-surface text-xs">{med.name}</h4>
                         <p className="text-[10px] text-on-surface-variant mt-0.5">{med.dose}</p>
+                        {(med.totalQuantity || med.deliveryFrequency) && (
+                          <p className="text-[10px] text-primary font-bold mt-1">
+                            Indicado: {med.totalQuantity || 'N/R'} {med.unit || 'dosis'} | Entrega: {med.deliveryFrequency || 'N/R'}
+                          </p>
+                        )}
+                        {med.notes && <p className="text-[10px] text-on-surface-variant mt-1 italic">{med.notes}</p>}
                         <span className="text-[9px] bg-secondary-container text-on-secondary-container px-2 py-0.5 rounded font-bold mt-2 inline-block">
                           Inicio: {med.date} {med.endDate ? ` - Fin: ${med.endDate}` : ''}
                         </span>
@@ -539,6 +557,51 @@ export default function Triage({ token }) {
                   required 
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Cantidad Total Indicada</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={medTotalQuantity}
+                    onChange={e => setMedTotalQuantity(e.target.value)}
+                    placeholder="ej. 30"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Unidad</label>
+                  <select
+                    value={medUnit}
+                    onChange={e => setMedUnit(e.target.value)}
+                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 focus:outline-none"
+                  >
+                    <option value="Dosis">Dosis</option>
+                    <option value="Tabletas">Tabletas</option>
+                    <option value="Pastillas">Pastillas</option>
+                    <option value="Cajas">Cajas</option>
+                    <option value="Blisters">Blisters</option>
+                    <option value="Frascos">Frascos</option>
+                    <option value="Viales">Viales</option>
+                    <option value="Ampollas">Ampollas</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Frecuencia de Entrega</label>
+                <select
+                  value={medDeliveryFrequency}
+                  onChange={e => setMedDeliveryFrequency(e.target.value)}
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 focus:outline-none"
+                >
+                  <option value="Única">Única</option>
+                  <option value="Semanal">Semanal</option>
+                  <option value="Quincenal">Quincenal</option>
+                  <option value="Mensual">Mensual</option>
+                  <option value="Continuada">Continuada / según control médico</option>
+                </select>
+              </div>
               <div>
                 <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Fecha de Inicio</label>
                 <input 
@@ -557,6 +620,16 @@ export default function Triage({ token }) {
                   onChange={e => setMedEndDate(e.target.value)} 
                   placeholder="Ej. 19/Oct/2023 o 7 días" 
                   className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 focus:outline-none" 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Observaciones / Prescripción</label>
+                <textarea
+                  value={medNotes}
+                  onChange={e => setMedNotes(e.target.value)}
+                  rows="2"
+                  placeholder="Indicaciones relevantes, restricciones o responsable médico."
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 focus:outline-none resize-none"
                 />
               </div>
 

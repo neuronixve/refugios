@@ -84,6 +84,23 @@ CREATE TABLE IF NOT EXISTS supply_deliveries (
     delivered_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Tabla de Entrega Controlada de Medicamentos
+CREATE TABLE IF NOT EXISTS medication_deliveries (
+    id SERIAL PRIMARY KEY,
+    refugio_id INTEGER REFERENCES refugios(id) ON DELETE CASCADE,
+    resident_id INTEGER REFERENCES damnificados(id) ON DELETE CASCADE,
+    inventory_item_id INTEGER REFERENCES inventory(id) ON DELETE SET NULL,
+    medication_index INTEGER,
+    medication_name VARCHAR(150) NOT NULL,
+    dose TEXT,
+    quantity NUMERIC(10,2) NOT NULL,
+    unit VARCHAR(30) DEFAULT 'Dosis',
+    delivery_frequency VARCHAR(30) DEFAULT 'Única',
+    notes TEXT,
+    delivered_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    delivered_at TIMESTAMP DEFAULT NOW()
+);
+
 -- Tabla de Planificación de Menús
 CREATE TABLE IF NOT EXISTS menus (
     id SERIAL PRIMARY KEY,

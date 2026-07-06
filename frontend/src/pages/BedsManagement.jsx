@@ -28,6 +28,7 @@ export default function BedsManagement({ token }) {
   const [newSpaceBedCount, setNewSpaceBedCount] = useState(10);
   const [editingSpaceName, setEditingSpaceName] = useState('');
   const [editingSpaceNewName, setEditingSpaceNewName] = useState('');
+  const [editingSpaceBedCount, setEditingSpaceBedCount] = useState(1);
   
   const [assigneeId, setAssigneeId] = useState('');
   const [residentSearchTerm, setResidentSearchTerm] = useState('');
@@ -159,6 +160,7 @@ export default function BedsManagement({ token }) {
     e.stopPropagation();
     setEditingSpaceName(spaceName);
     setEditingSpaceNewName(spaceName);
+    setEditingSpaceBedCount(spaces[spaceName]?.total || 1);
     setShowEditSpaceModal(true);
   };
 
@@ -175,11 +177,12 @@ export default function BedsManagement({ token }) {
         },
         body: JSON.stringify({
           old_room_number: editingSpaceName,
-          new_room_number: editingSpaceNewName
+          new_room_number: editingSpaceNewName,
+          bed_count: parseInt(editingSpaceBedCount)
         })
       });
       if (res.ok) {
-        setMessage('Espacio renombrado exitosamente.');
+        setMessage('Espacio actualizado exitosamente.');
         setShowEditSpaceModal(false);
         fetchBeds();
         if (selectedSpace === editingSpaceName) {
@@ -814,6 +817,22 @@ export default function BedsManagement({ token }) {
                   className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-on-surface-variant block mb-1">Cantidad de Camas</label>
+                <input
+                  type="number"
+                  min={spaces[editingSpaceName]?.occupied || 1}
+                  max="300"
+                  value={editingSpaceBedCount}
+                  onChange={(e) => setEditingSpaceBedCount(e.target.value)}
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none"
+                  required
+                />
+                <p className="mt-1 text-[10px] font-medium text-on-surface-variant">
+                  Ocupadas actualmente: {spaces[editingSpaceName]?.occupied || 0}. No se pueden eliminar camas ocupadas.
+                </p>
               </div>
 
               <div className="flex gap-2 mt-4">
