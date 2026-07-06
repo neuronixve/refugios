@@ -8,7 +8,9 @@ CREATE TABLE IF NOT EXISTS refugios (
     capacity INTEGER NOT NULL,
     contact_phone VARCHAR(20),
     status VARCHAR(50) DEFAULT 'Operativo', -- 'Operativo', 'Alerta Suministros', 'Inactivo'
+    image_url TEXT,
     estado VARCHAR(100),
+    staff_config TEXT DEFAULT '{}',
     created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -135,6 +137,19 @@ CREATE TABLE IF NOT EXISTS depositos (
     description TEXT,
     capacity_percent INTEGER DEFAULT 0,
     CONSTRAINT unique_deposito_name_per_refugio UNIQUE (refugio_id, name)
+);
+
+-- Tabla de Solicitudes al Almacén
+CREATE TABLE IF NOT EXISTS warehouse_requests (
+    id SERIAL PRIMARY KEY,
+    refugio_id INTEGER REFERENCES refugios(id) ON DELETE CASCADE,
+    area VARCHAR(100) NOT NULL,
+    item_name VARCHAR(100) NOT NULL,
+    quantity NUMERIC(10,2) NOT NULL DEFAULT 0,
+    unit VARCHAR(20) DEFAULT 'Unidades',
+    details TEXT,
+    status VARCHAR(30) DEFAULT 'Pendiente',
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Tabla de Reporte de Incidencias de Seguridad

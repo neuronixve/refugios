@@ -35,6 +35,7 @@ async function initDb() {
     await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS refugio_id INTEGER REFERENCES refugios(id) ON DELETE SET NULL');
     await db.query('ALTER TABLE menus ADD COLUMN IF NOT EXISTS ingredients TEXT');
     await db.query('ALTER TABLE refugios ADD COLUMN IF NOT EXISTS estado VARCHAR(100)');
+    await db.query('ALTER TABLE refugios ADD COLUMN IF NOT EXISTS image_url TEXT');
     await db.query('ALTER TABLE incidents ADD COLUMN IF NOT EXISTS involved_residents TEXT DEFAULT \'[]\'');
     await db.query('ALTER TABLE inventory ADD COLUMN IF NOT EXISTS deposito_id INTEGER REFERENCES depositos(id) ON DELETE SET NULL');
     await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS card_printed BOOLEAN DEFAULT FALSE');
@@ -1618,4 +1619,3 @@ app.listen(PORT, async () => {
 });
 
 // Trigger reload after database schema migration. (Status added)
-
