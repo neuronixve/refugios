@@ -1,6 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
+const MEAL_WINDOWS = [
+  { mealType: 'Desayuno', label: '06:00 AM - 11:00 AM', start: 6 * 60, end: 11 * 60 },
+  { mealType: 'Almuerzo', label: '11:30 AM - 04:30 PM', start: 11 * 60 + 30, end: 16 * 60 + 30 },
+  { mealType: 'Cena', label: '05:30 PM - 10:00 PM', start: 17 * 60 + 30, end: 22 * 60 }
+];
+
+const getCurrentMealWindow = (date = new Date()) => {
+  const minutes = date.getHours() * 60 + date.getMinutes();
+  return MEAL_WINDOWS.find(window => minutes >= window.start && minutes <= window.end) || null;
+};
+
 export default function LogisticsPanel({ token }) {
   const { refugioId } = useParams();
   const navigate = useNavigate();
@@ -9,6 +20,7 @@ export default function LogisticsPanel({ token }) {
   const [attendance, setAttendance] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [currentMealWindow, setCurrentMealWindow] = useState(getCurrentMealWindow());
 
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
@@ -17,6 +29,11 @@ export default function LogisticsPanel({ token }) {
   useEffect(() => {
     fetchData();
   }, [refugioId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentMealWindow(getCurrentMealWindow()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -179,30 +196,41 @@ export default function LogisticsPanel({ token }) {
             {/* Turnos de Comida & Inventario Perecedero en fila */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               
-              {/* Turnos de Comida */}
+              {/* Horarios de Comida */}
               <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs flex flex-col gap-4">
                 <h3 className="text-xs font-black text-on-surface uppercase tracking-wider flex items-center gap-2">
                   <span className="material-symbols-outlined text-sm text-[#0b2347]">schedule</span>
-                  Turnos de Comida
+                  Horarios de Comida
                 </h3>
 
                 <div className="flex flex-col gap-3 text-xs">
-                  <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl">
-                    <div className="flex justify-between items-center">
-                      <span className="font-black text-[#0b2347] uppercase text-[10px]">Turno Actual (12:30 - 13:15)</span>
-                      <span className="material-symbols-outlined text-xs text-primary animate-pulse">sensors</span>
+                  {MEAL_WINDOWS.map(window => {
+                    const isActive = currentMealWindow?.mealType === window.mealType;
+                    return (
+                      <div
+                        key={window.mealType}
+                        className={`p-4 rounded-2xl border ${
+                          isActive ? 'bg-primary/5 border-primary/20' : 'bg-surface-container-low border-outline-variant/40 opacity-80'
+                        }`}
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className={`font-black uppercase text-[10px] ${isActive ? 'text-[#0b2347]' : 'text-on-surface-variant'}`}>
+                            {window.mealType}
+                          </span>
+                          {isActive && <span className="material-symbols-outlined text-xs text-primary animate-pulse">sensors</span>}
+                        </div>
+                        <p className="font-bold text-on-surface mt-1">{window.label}</p>
+                        <p className="text-[9px] text-on-surface-variant font-mono mt-1">
+                          {isActive ? 'Registro de comedor activo ahora.' : 'Registro automático al llegar la hora.'}
+                        </p>
+                      </div>
+                    );
+                  })}
+                  {!currentMealWindow && (
+                    <div className="p-3 bg-error/10 border border-error/20 rounded-xl text-[10px] text-error font-bold">
+                      Fuera de horario de servicio. No se registran comidas en este momento.
                     </div>
-                    <p className="font-bold text-on-surface mt-1">Grupo Sector A y B</p>
-                    <div className="w-full bg-surface-container rounded-full h-1 mt-2.5">
-                      <div className="bg-primary h-1 rounded-full" style={{ width: '85%' }}></div>
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-surface-container-low border border-outline-variant/40 rounded-2xl opacity-75">
-                    <span className="font-black text-on-surface-variant uppercase text-[10px]">Próximo Turno (13:15 - 14:00)</span>
-                    <p className="font-bold text-on-surface mt-1">Grupo Sector C y Dormitorios</p>
-                    <p className="text-[9px] text-on-surface-variant font-mono mt-1">Preparación en curso...</p>
-                  </div>
+                  )}
                 </div>
               </div>
 

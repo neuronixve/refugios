@@ -2,6 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
+const MEAL_WINDOWS = [
+  { mealType: 'Desayuno', label: '06:00 AM - 11:00 AM', start: 6 * 60, end: 11 * 60 },
+  { mealType: 'Almuerzo', label: '11:30 AM - 04:30 PM', start: 11 * 60 + 30, end: 16 * 60 + 30 },
+  { mealType: 'Cena', label: '05:30 PM - 10:00 PM', start: 17 * 60 + 30, end: 22 * 60 }
+];
+
+const getCurrentMealWindow = (date = new Date()) => {
+  const minutes = date.getHours() * 60 + date.getMinutes();
+  return MEAL_WINDOWS.find(window => minutes >= window.start && minutes <= window.end) || null;
+};
+
 export default function LogisticsAttendance({ token }) {
   const { refugioId } = useParams();
 
@@ -14,7 +25,7 @@ export default function LogisticsAttendance({ token }) {
 
   // Scanning State
   const [scanning, setScanning] = useState(true);
-  const [mealType, setMealType] = useState('Almuerzo'); // 'Desayuno', 'Almuerzo', 'Cena'
+  const [currentMealWindow, setCurrentMealWindow] = useState(getCurrentMealWindow());
   const [scannedResident, setScannedResident] = useState(null);
   
   // Autocomplete Manual Entry States
@@ -35,7 +46,21 @@ export default function LogisticsAttendance({ token }) {
   }, [refugioId]);
 
   useEffect(() => {
-    if (scanning && !scannerRef.current) {
+    const updateMealWindow = () => {
+      const activeWindow = getCurrentMealWindow();
+      setCurrentMealWindow(activeWindow);
+      if (!activeWindow) {
+        setScanning(false);
+      }
+    };
+
+    updateMealWindow();
+    const timer = window.setInterval(updateMealWindow, 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (scanning && currentMealWindow && !scannerRef.current) {
       startScanner();
     } else if (!scanning && scannerRef.current) {
       stopScanner();
@@ -44,7 +69,7 @@ export default function LogisticsAttendance({ token }) {
     return () => {
       stopScanner();
     };
-  }, [scanning, mealType]);
+  }, [scanning, currentMealWindow?.mealType]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -181,6 +206,13 @@ export default function LogisticsAttendance({ token }) {
   };
 
   const registerAttendance = async (docId, residentId = null) => {
+    if (!currentMealWindow) {
+      playAlertSound('error');
+      setError('Fuera del horario de servicio. Desayuno 06:00-11:00, Almuerzo 11:30-16:30, Cena 17:30-22:00.');
+      setScanning(false);
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE}/meals/attendance`, {
         method: 'POST',
@@ -192,13 +224,14 @@ export default function LogisticsAttendance({ token }) {
           document_id: docId,
           resident_id: residentId,
           refugio_id: parseInt(refugioId),
-          meal_type: mealType
+          meal_type: currentMealWindow.mealType
         })
       });
 
       if (res.ok) {
         playAlertSound('success');
-        setMessage(`Asistencia a ${mealType} registrada correctamente.`);
+        const data = await res.json();
+        setMessage(`Asistencia a ${data.attendance?.meal_type || currentMealWindow.mealType} registrada correctamente.`);
         fetchData();
       } else {
         const errData = await res.json();
@@ -232,7 +265,9 @@ export default function LogisticsAttendance({ token }) {
     setError('');
     setMessage('');
     setScannedResident(null);
-    setScanning(true);
+    if (currentMealWindow) {
+      setScanning(true);
+    }
   };
 
   // Get family count for resident
@@ -277,6 +312,7 @@ export default function LogisticsAttendance({ token }) {
 
   // Counters
   const totalActive = residents.filter(r => r.status === 'Activo').length;
+  const mealType = currentMealWindow?.mealType || 'Sin turno';
   const servidosHoy = attendance.filter(a => a.meal_type === mealType).length;
   const pendientesHoy = Math.max(0, totalActive - servidosHoy);
 
@@ -295,22 +331,14 @@ export default function LogisticsAttendance({ token }) {
           <p className="text-xs text-on-surface-variant mt-1.5 font-mono">Control de entrega de comidas en tiempo real.</p>
         </div>
 
-        {/* Meal Selector Tabs */}
-        <div className="flex bg-surface-container rounded-xl p-1 gap-1">
-          {['Desayuno', 'Almuerzo', 'Cena'].map((type) => (
-            <button
-              key={type}
-              onClick={() => {
-                setMealType(type);
-                handleResumeScan();
-              }}
-              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                mealType === type ? 'bg-[#0b2347] text-white' : 'text-on-surface-variant hover:text-on-surface'
-              }`}
-            >
-              {type}
-            </button>
-          ))}
+        {/* Automatic Meal Window */}
+        <div className={`rounded-xl px-4 py-3 border text-xs font-bold ${
+          currentMealWindow ? 'bg-primary/10 border-primary/20 text-primary' : 'bg-error/10 border-error/20 text-error'
+        }`}>
+          <span className="block text-[9px] uppercase tracking-wider text-on-surface-variant font-black">Turno automático por hora</span>
+          <span className="block mt-0.5">
+            {currentMealWindow ? `${currentMealWindow.mealType} (${currentMealWindow.label})` : 'Fuera de horario de comida'}
+          </span>
         </div>
       </header>
 
@@ -373,7 +401,7 @@ export default function LogisticsAttendance({ token }) {
                 <span className="material-symbols-outlined text-sm text-[#0b2347]">photo_camera</span>
                 Escaneo de Carnet QR ({mealType})
               </h3>
-              {!scanning && (
+              {!scanning && currentMealWindow && (
                 <button 
                   onClick={handleResumeScan}
                   className="px-3 py-1 bg-primary text-on-primary font-bold text-[10px] rounded-lg cursor-pointer"
@@ -383,7 +411,7 @@ export default function LogisticsAttendance({ token }) {
               )}
             </div>
 
-            {scanning ? (
+            {scanning && currentMealWindow ? (
               <div className="relative aspect-square max-w-[320px] mx-auto w-full bg-black rounded-2xl overflow-hidden border border-outline-variant">
                 <div id="comedor-qr-reader" className="w-full h-full"></div>
                 <div className="absolute top-4 left-4 bg-error text-white font-black text-[9px] px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
@@ -397,17 +425,23 @@ export default function LogisticsAttendance({ token }) {
                   <span className="material-symbols-outlined text-xl">pause_circle</span>
                 </div>
                 <div>
-                  <h4 className="text-xs font-black uppercase text-on-surface">Escáner en Pausa</h4>
+                  <h4 className="text-xs font-black uppercase text-on-surface">
+                    {currentMealWindow ? 'Escáner en Pausa' : 'Servicio Cerrado'}
+                  </h4>
                   <p className="text-[10px] text-on-surface-variant font-medium mt-1 leading-relaxed">
-                    Se detuvo el lector para revisar los datos de la última credencial. Presione "Reanudar" para continuar.
+                    {currentMealWindow
+                      ? 'Se detuvo el lector para revisar los datos de la última credencial. Presione "Reanudar" para continuar.'
+                      : 'El registro de comida solo está disponible en estos horarios: desayuno 06:00-11:00, almuerzo 11:30-16:30 y cena 17:30-22:00.'}
                   </p>
                 </div>
-                <button 
-                  onClick={handleResumeScan}
-                  className="px-4 py-2 bg-[#0b2347] text-white font-bold text-xs rounded-xl hover:opacity-95 transition-all cursor-pointer"
-                >
-                  Reanudar Escaneo
-                </button>
+                {currentMealWindow && (
+                  <button 
+                    onClick={handleResumeScan}
+                    className="px-4 py-2 bg-[#0b2347] text-white font-bold text-xs rounded-xl hover:opacity-95 transition-all cursor-pointer"
+                  >
+                    Reanudar Escaneo
+                  </button>
+                )}
               </div>
             )}
             
@@ -495,10 +529,10 @@ export default function LogisticsAttendance({ token }) {
 
               <button 
                 type="submit"
-                disabled={!selectedManualResident}
+                disabled={!selectedManualResident || !currentMealWindow}
                 className="w-full py-3 bg-[#0b2347] text-white font-bold rounded-xl text-xs hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-all"
               >
-                Registrar Asistencia
+                {currentMealWindow ? 'Registrar Asistencia' : 'Registro fuera de horario'}
               </button>
             </form>
           </div>

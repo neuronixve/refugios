@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useParams, useNavigate, useLocation } from 'react-router-dom';
 
-export default function Sidebar({ user, selectedRefugio, onLogout }) {
+export default function Sidebar({ user, selectedRefugio, onLogout, mobileOpen = false, onMobileClose = () => {} }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { refugioId } = useParams();
@@ -9,6 +9,7 @@ export default function Sidebar({ user, selectedRefugio, onLogout }) {
   const [comedorExpanded, setComedorExpanded] = useState(false);
   const [medicoExpanded, setMedicoExpanded] = useState(false);
   const [almacenExpanded, setAlmacenExpanded] = useState(false);
+  const [carnetizacionExpanded, setCarnetizacionExpanded] = useState(false);
 
   const activeClass = "flex items-center gap-3 px-4 py-2.5 bg-primary-container text-on-primary-container font-bold rounded-lg transition-all scale-95 duration-100 text-xs";
   const inactiveClass = "flex items-center gap-3 px-4 py-2.5 text-on-surface-variant hover:bg-secondary-container rounded-lg transition-all text-xs cursor-pointer";
@@ -26,14 +27,38 @@ export default function Sidebar({ user, selectedRefugio, onLogout }) {
     if (location.pathname.includes('/almacen/')) {
       setAlmacenExpanded(true);
     }
+    if (location.pathname.includes('/carnetizacion')) {
+      setCarnetizacionExpanded(true);
+    }
+    onMobileClose();
   }, [location.pathname]);
 
   return (
-    <aside className="hidden lg:flex flex-col fixed left-0 top-20 h-[calc(100vh-80px)] w-[280px] p-gutter bg-surface border-r border-outline-variant">
+    <>
+    {mobileOpen && (
+      <button
+        type="button"
+        aria-label="Cerrar menú"
+        onClick={onMobileClose}
+        className="lg:hidden fixed inset-0 z-[55] bg-black/45 backdrop-blur-[1px]"
+      />
+    )}
+
+    <aside className={`flex flex-col fixed left-0 top-0 lg:top-20 h-screen lg:h-[calc(100vh-80px)] w-[300px] max-w-[86vw] lg:w-[280px] lg:max-w-none p-gutter bg-surface border-r border-outline-variant z-[60] lg:z-40 shadow-2xl lg:shadow-none transition-transform duration-200 ease-out ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
       {/* Brand & Sede Context */}
       <div className="flex flex-col gap-2 mb-6">
         <div className="px-2">
-          <h2 className="text-xs font-black text-primary uppercase tracking-wider">Venezuela Renacerá</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-xs font-black text-primary uppercase tracking-wider">Venezuela Renacerá</h2>
+            <button
+              type="button"
+              onClick={onMobileClose}
+              className="lg:hidden w-8 h-8 rounded-lg text-on-surface-variant hover:bg-surface-container flex items-center justify-center"
+              aria-label="Cerrar menú"
+            >
+              <span className="material-symbols-outlined text-lg">close</span>
+            </button>
+          </div>
           {selectedRefugio ? (
             <div className="mt-2 bg-primary-container/20 border border-primary/20 rounded-lg p-3">
               <span className="text-[10px] font-semibold text-primary block">Sede Activa:</span>
@@ -105,6 +130,10 @@ export default function Sidebar({ user, selectedRefugio, onLogout }) {
                       <span className="material-symbols-outlined text-xs">vaccines</span>
                       <span>Alertas de Insumos</span>
                     </NavLink>
+                    <NavLink to={`/refugio/${selectedRefugio.id}/medico/inventario`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
+                      <span className="material-symbols-outlined text-xs">inventory_2</span>
+                      <span>Inventario de Salud</span>
+                    </NavLink>
                     <NavLink to={`/refugio/${selectedRefugio.id}/medico/reporte`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
                       <span className="material-symbols-outlined text-xs">assignment</span>
                       <span>Reporte de Salud</span>
@@ -115,10 +144,33 @@ export default function Sidebar({ user, selectedRefugio, onLogout }) {
             )}
 
             {(user.role === 'admin' || user.role === 'gerente' || user.role === 'registro') && (
-              <NavLink to={`/refugio/${selectedRefugio.id}/carnetizacion`} className={({ isActive }) => isActive ? activeClass : inactiveClass}>
-                <span className="material-symbols-outlined text-sm">badge</span>
-                <span className="text-label-md">Carnetización</span>
-              </NavLink>
+              <div>
+                <button 
+                  onClick={() => setCarnetizacionExpanded(!carnetizacionExpanded)}
+                  className={`w-full ${location.pathname.includes('/carnetizacion') ? 'bg-primary-container/30 text-primary font-bold' : 'text-on-surface-variant'} flex items-center justify-between px-4 py-2.5 rounded-lg hover:bg-secondary-container/60 transition-all text-xs cursor-pointer`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="material-symbols-outlined text-sm">badge</span>
+                    <span>Carnetización</span>
+                  </div>
+                  <span className="material-symbols-outlined text-xs">
+                    {carnetizacionExpanded ? 'expand_less' : 'expand_more'}
+                  </span>
+                </button>
+
+                {carnetizacionExpanded && (
+                  <div className="flex flex-col gap-0.5 mt-1 ml-2 pl-2 border-l border-outline-variant/60 animate-in fade-in slide-in-from-top-1 duration-150">
+                    <NavLink to={`/refugio/${selectedRefugio.id}/carnetizacion/residentes`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
+                      <span className="material-symbols-outlined text-xs">groups</span>
+                      <span>Residentes</span>
+                    </NavLink>
+                    <NavLink to={`/refugio/${selectedRefugio.id}/carnetizacion/personal`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
+                      <span className="material-symbols-outlined text-xs">assignment_ind</span>
+                      <span>Personal de Apoyo</span>
+                    </NavLink>
+                  </div>
+                )}
+              </div>
             )}
 
             {(user.role === 'admin' || user.role === 'gerente' || user.role === 'seguridad') && (
@@ -267,7 +319,10 @@ export default function Sidebar({ user, selectedRefugio, onLogout }) {
           </>
         )}
         <button 
-          onClick={onLogout}
+          onClick={() => {
+            onMobileClose();
+            onLogout();
+          }}
           className="flex items-center gap-3 px-4 py-2.5 text-error hover:bg-error-container/20 rounded-lg transition-all text-left w-full font-semibold text-xs cursor-pointer"
         >
           <span className="material-symbols-outlined text-sm">logout</span>
@@ -275,5 +330,6 @@ export default function Sidebar({ user, selectedRefugio, onLogout }) {
         </button>
       </div>
     </aside>
+    </>
   );
 }

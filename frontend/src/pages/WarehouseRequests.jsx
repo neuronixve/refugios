@@ -23,6 +23,14 @@ export default function WarehouseRequests({ token }) {
     fetchRequests();
   }, [refugioId]);
 
+  const isLocalServiceDeposito = (name = '') => {
+    const normalized = name.toLowerCase();
+    return normalized.includes('cocina') ||
+      normalized.includes('médico') ||
+      normalized.includes('medico') ||
+      normalized.includes('salud');
+  };
+
   const fetchRequests = async () => {
     setLoading(true);
     try {
@@ -51,7 +59,7 @@ export default function WarehouseRequests({ token }) {
     const cleanReqName = itemName.replace(/\s*\(.*?\)\s*/g, '').toLowerCase().trim();
     return (inventory || [])
       .filter(i => {
-        if (i.deposito_name && i.deposito_name.toLowerCase().includes('cocina')) {
+        if (i.deposito_name && isLocalServiceDeposito(i.deposito_name)) {
           return false;
         }
         const cleanItemName = i.item_name.replace(/\s*\(.*?\)\s*/g, '').toLowerCase().trim();
@@ -64,7 +72,7 @@ export default function WarehouseRequests({ token }) {
     if (!req || !req.item_name) return [];
     const cleanReqName = req.item_name.replace(/\s*\(.*?\)\s*/g, '').toLowerCase().trim();
     return (inventory || []).filter(item => {
-      if (!item.deposito_name || item.deposito_name.toLowerCase().includes('cocina')) {
+      if (!item.deposito_name || isLocalServiceDeposito(item.deposito_name)) {
         return false;
       }
       const cleanItemName = item.item_name.replace(/\s*\(.*?\)\s*/g, '').toLowerCase().trim();
@@ -144,7 +152,8 @@ export default function WarehouseRequests({ token }) {
                       <td className="py-4 pl-2 font-mono font-bold text-[#0b2347]">#{req.id}</td>
                       <td className="py-4">
                         <span className={`px-2 py-0.5 rounded font-black text-[9px] uppercase ${
-                          req.area === 'Comedor' ? 'bg-amber-600/15 text-amber-700' : 'bg-primary/10 text-primary'
+                          req.area === 'Comedor' ? 'bg-amber-600/15 text-amber-700' :
+                          req.area === 'Servicio Médico' ? 'bg-sky-600/15 text-sky-800' : 'bg-primary/10 text-primary'
                         }`}>{req.area}</span>
                       </td>
                       <td className="py-4 font-bold text-on-surface">{req.item_name}</td>

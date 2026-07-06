@@ -7,6 +7,7 @@ export default function LogisticsMenus({ token }) {
   const [menus, setMenus] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [residents, setResidents] = useState([]);
+  const [staffCount, setStaffCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -31,6 +32,8 @@ export default function LogisticsMenus({ token }) {
   const DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
   const DAYS_SHORT = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
   const MEALS = ['Desayuno', 'Almuerzo', 'Cena'];
+  const todayName = DAYS[(new Date().getDay() + 6) % 7];
+  const [requirementDay, setRequirementDay] = useState(todayName);
 
   useEffect(() => {
     fetchData();
@@ -62,6 +65,15 @@ export default function LogisticsMenus({ token }) {
       });
       if (resRes.ok) {
         setResidents(await resRes.json());
+      }
+
+      // 4. Fetch support staff count assigned to this shelter
+      const resStaff = await fetch(`${API_BASE}/refugios/${refugioId}/staff-count`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (resStaff.ok) {
+        const staffData = await resStaff.json();
+        setStaffCount(staffData.count || 0);
       }
     } catch (err) {
       console.error(err);
@@ -120,6 +132,8 @@ export default function LogisticsMenus({ token }) {
   // Parse resident diets & conditions
   const activeResidents = residents.filter(r => r.status === 'Activo');
   const totalActive = activeResidents.length;
+  const totalStaff = staffCount;
+  const totalDiners = totalActive + totalStaff;
 
   let lactantesCount = 0;
   let hipertensosCount = 0;
@@ -154,63 +168,107 @@ export default function LogisticsMenus({ token }) {
     }
   });
 
-  // Parse required ingredients from all menus
-  const getWeeklyRequiredIngredients = () => {
-    const reqs = {};
-    menus.forEach(m => {
-      if (!m.ingredients) return;
-      const parts = m.ingredients.split(/[,;\n]+/);
-      parts.forEach(part => {
-        const trimmed = part.trim();
-        if (!trimmed) return;
+  const normalizeName = (value) => value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
-        let name = '';
-        let qty = 1;
-        let unit = 'Unidades';
+  const normalizeUnit = (value = '') => {
+    const unit = value.toLowerCase().trim();
+    if (['kg', 'kilo', 'kilos', 'kilogramo', 'kilogramos'].includes(unit)) return 'kg';
+    if (['g', 'gr', 'gramo', 'gramos'].includes(unit)) return 'g';
+    if (['l', 'lt', 'lts', 'litro', 'litros'].includes(unit)) return 'litros';
+    if (['ml', 'mililitro', 'mililitros'].includes(unit)) return 'ml';
+    if (['paq', 'paquete', 'paquetes'].includes(unit)) return 'paquetes';
+    if (['u', 'ud', 'uds', 'unidad', 'unidades'].includes(unit)) return 'Unidades';
+    return value.trim() || 'Unidades';
+  };
 
-        if (trimmed.includes(':')) {
-          const split = trimmed.split(':');
-          name = split[0].trim();
-          const qtyStr = split[1].trim();
-          const numMatch = qtyStr.match(/^(\d+(?:\.\d+)?)\s*(.*)$/);
-          if (numMatch) {
-            qty = parseFloat(numMatch[1]);
-            unit = numMatch[2].trim() || 'Unidades';
-          }
-        } else {
-          const leadMatch = trimmed.match(/^(\d+(?:\.\d+)?)\s*(?:(kg|g|paquetes|paq|l|litros|unidades|uds|u))?\s*(?:de\s+)?(.*)$/i);
-          const trailMatch = trimmed.match(/^(.*?)\s+(\d+(?:\.\d+)?)\s*(kg|g|paquetes|paq|l|litros|unidades|uds|u)?$/i);
-          
-          if (leadMatch) {
-            qty = parseFloat(leadMatch[1]);
-            unit = leadMatch[2] || 'Unidades';
-            name = leadMatch[3].trim();
-          } else if (trailMatch) {
-            name = trailMatch[1].trim();
-            qty = parseFloat(trailMatch[2]);
-            unit = trailMatch[3] || 'Unidades';
-          } else {
-            name = trimmed;
-          }
-        }
-
-        if (name) {
-          const key = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-          if (!reqs[key]) {
-            reqs[key] = { name: name, quantity: 0, unit: unit };
-          }
-          reqs[key].quantity += qty;
-        }
-      });
+  const formatQuantity = (value) => {
+    const num = parseFloat(value) || 0;
+    if (Number.isInteger(num)) return num.toString();
+    return num.toLocaleString('es-VE', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 3
     });
+  };
+
+  const parseIngredients = (ingredients) => {
+    if (!ingredients) return [];
+    const reqs = {};
+    const normalizedText = ingredients.replace(/\s+y\s+(?=\d+(?:[.,]\d+)?\s*(?:kg|g|gr|gramos|paquetes|paq|l|lt|litros|ml|unidades|uds|u)\b)/gi, ', ');
+    const parts = normalizedText.split(/[;\n]+|,\s+(?=(?:\d|[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]))/);
+
+    parts.forEach(part => {
+      const trimmed = part.trim();
+      if (!trimmed) return;
+
+      let name = '';
+      let qty = 1;
+      let unit = 'Unidades';
+
+      if (trimmed.includes(':')) {
+        const split = trimmed.split(':');
+        name = split[0].trim();
+        const qtyStr = split.slice(1).join(':').trim();
+        const numMatch = qtyStr.match(/^(\d+(?:[.,]\d+)?)\s*(.*)$/);
+        if (numMatch) {
+          qty = parseFloat(numMatch[1].replace(',', '.'));
+          unit = normalizeUnit(numMatch[2]);
+        }
+      } else {
+        const leadMatch = trimmed.match(/^(\d+(?:[.,]\d+)?)\s*(?:(kg|g|gr|gramos|paquetes|paq|l|lt|litros|ml|unidades|uds|u))?\s*(?:de\s+)?(.*)$/i);
+        const trailMatch = trimmed.match(/^(.*?)\s+(\d+(?:[.,]\d+)?)\s*(kg|g|gr|gramos|paquetes|paq|l|lt|litros|ml|unidades|uds|u)?$/i);
+
+        if (leadMatch) {
+          qty = parseFloat(leadMatch[1].replace(',', '.'));
+          unit = normalizeUnit(leadMatch[2] || 'Unidades');
+          name = leadMatch[3].trim();
+        } else if (trailMatch) {
+          name = trailMatch[1].trim();
+          qty = parseFloat(trailMatch[2].replace(',', '.'));
+          unit = normalizeUnit(trailMatch[3] || 'Unidades');
+        } else {
+          name = trimmed;
+        }
+      }
+
+      if (name) {
+        name = name.replace(/^(de|del|la|el|los|las)\s+/i, '').trim();
+        const key = normalizeName(`${name}_${unit}`);
+        if (!reqs[key]) {
+          reqs[key] = { name, quantity: 0, unit };
+        }
+        reqs[key].quantity += qty;
+      }
+    });
+
     return Object.values(reqs);
   };
 
-  const weeklyRequirements = getWeeklyRequiredIngredients();
+  const getDailyRequiredIngredients = () => {
+    const reqs = {};
+    menus
+      .filter(m => m.day_of_week === requirementDay)
+      .forEach(m => {
+        parseIngredients(m.ingredients).forEach(ingredient => {
+          const key = normalizeName(`${ingredient.name}_${ingredient.unit}`);
+          if (!reqs[key]) {
+            reqs[key] = {
+              name: ingredient.name,
+              quantity: 0,
+              unit: ingredient.unit,
+              perServing: ingredient.quantity
+            };
+          }
+          reqs[key].quantity += ingredient.quantity * totalDiners;
+        });
+      });
+    return Object.values(reqs);
+  };
+
+  const dailyRequirements = getDailyRequiredIngredients();
 
   // Compare requirements with current local stock of Alimentos
-  const missingIngredients = weeklyRequirements.map(req => {
-    const invItem = inventory.find(inv => inv.item_name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === req.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+  const missingIngredients = dailyRequirements.map(req => {
+    const invItem = inventory.find(inv => normalizeName(inv.item_name) === normalizeName(req.name));
     const stock = invItem ? invItem.quantity : 0;
     const missing = Math.max(0, req.quantity - stock);
     return {
@@ -222,7 +280,7 @@ export default function LogisticsMenus({ token }) {
     };
   });
 
-  // Request only missing ingredients from the warehouse
+  // Request only missing daily ingredients from the warehouse
   const handleRequestMissingIngredients = async () => {
     const itemsToRequest = missingIngredients.filter(i => i.missing > 0);
     if (itemsToRequest.length === 0) return;
@@ -243,7 +301,9 @@ export default function LogisticsMenus({ token }) {
           body: JSON.stringify({
             area: 'Comedor',
             item_name: item.name,
-            quantity: item.missing
+            quantity: item.missing,
+            unit: item.unit,
+            details: `Requerimiento diario ${requirementDay}. Cálculo automático para ${totalActive} residentes + ${totalStaff} personal de apoyo = ${totalDiners} raciones.`
           })
         });
         if (res.ok) {
@@ -251,7 +311,7 @@ export default function LogisticsMenus({ token }) {
         }
       }
       if (successCount > 0) {
-        setMessage(`Se han enviado ${successCount} solicitudes de insumos faltantes al almacén central.`);
+        setMessage(`Se enviaron ${successCount} solicitudes del requerimiento diario de ${requirementDay} al almacén central.`);
         fetchData();
       } else {
         setError('Error al enviar las solicitudes al almacén.');
@@ -279,12 +339,13 @@ export default function LogisticsMenus({ token }) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          area: 'Comedor',
-          item_name: `${customItemName} (${customItemUnit})`,
-          quantity: customItemQty
-        })
-      });
+          body: JSON.stringify({
+            area: 'Comedor',
+            item_name: customItemName,
+            quantity: customItemQty,
+            unit: customItemUnit
+          })
+        });
       if (res.ok) {
         setMessage(`Solicitud enviada al almacén: ${customItemQty} ${customItemUnit} de ${customItemName}.`);
         setCustomItemName('');
@@ -332,7 +393,7 @@ export default function LogisticsMenus({ token }) {
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs">
               <div className="flex justify-between items-center mb-6">
                 <span className="text-xs font-black text-on-surface uppercase tracking-wider">Calendario Semanal</span>
-                <span className="text-[10px] text-on-surface-variant font-bold">Haz clic en cualquier comida para editar su menú</span>
+                <span className="text-[10px] text-on-surface-variant font-bold">Haz clic en una comida para cargar plato e ingredientes por ración</span>
               </div>
 
               {/* Days Headers */}
@@ -431,15 +492,40 @@ export default function LogisticsMenus({ token }) {
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs flex flex-col gap-4">
               <h3 className="text-xs font-black text-on-surface uppercase tracking-wider flex items-center gap-2">
                 <span className="material-symbols-outlined text-sm text-primary">analytics</span>
-                Requerimiento Semanal (Cocina)
+                Requerimiento Diario (Cocina)
               </h3>
+
+              <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 flex flex-col gap-2">
+                <label className="text-[9px] font-black text-on-surface-variant uppercase">Día a calcular</label>
+                <select
+                  value={requirementDay}
+                  onChange={e => setRequirementDay(e.target.value)}
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-bold"
+                >
+                  {DAYS.map(day => <option key={day} value={day}>{day}</option>)}
+                </select>
+                <div className="grid grid-cols-3 gap-2 text-center text-[9px] font-bold text-on-surface-variant">
+                  <div className="bg-white/70 rounded-lg p-2">
+                    <span className="block text-[#0b2347] font-black text-xs">{totalActive}</span>
+                    Residentes
+                  </div>
+                  <div className="bg-white/70 rounded-lg p-2">
+                    <span className="block text-[#0b2347] font-black text-xs">{totalStaff}</span>
+                    Personal
+                  </div>
+                  <div className="bg-white/70 rounded-lg p-2">
+                    <span className="block text-[#0b2347] font-black text-xs">{totalDiners}</span>
+                    Raciones
+                  </div>
+                </div>
+              </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-[10px] border-collapse">
                   <thead>
                     <tr className="border-b border-outline-variant text-on-surface-variant font-bold">
                       <th className="pb-2">Ingrediente</th>
-                      <th className="pb-2 text-center">Req.</th>
+                      <th className="pb-2 text-center">Total Día</th>
                       <th className="pb-2 text-center">Stock</th>
                       <th className="pb-2 text-right">Faltante</th>
                     </tr>
@@ -448,12 +534,12 @@ export default function LogisticsMenus({ token }) {
                     {missingIngredients.map((item, idx) => (
                       <tr key={idx} className="border-b border-outline-variant/30">
                         <td className="py-2 font-bold text-on-surface">{item.name}</td>
-                        <td className="py-2 text-center font-mono text-on-surface-variant">{item.required}</td>
-                        <td className="py-2 text-center font-mono text-on-surface-variant">{item.stock}</td>
+                        <td className="py-2 text-center font-mono text-on-surface-variant">{formatQuantity(item.required)}</td>
+                        <td className="py-2 text-center font-mono text-on-surface-variant">{formatQuantity(item.stock)}</td>
                         <td className="py-2 text-right">
                           {item.missing > 0 ? (
                             <span className="px-1.5 py-0.5 bg-error-container/20 text-error font-black rounded text-[8px] font-mono">
-                              +{item.missing} {item.unit}
+                              +{formatQuantity(item.missing)} {item.unit}
                             </span>
                           ) : (
                             <span className="px-1.5 py-0.5 bg-success/10 text-success font-black rounded text-[8px]">
@@ -466,7 +552,7 @@ export default function LogisticsMenus({ token }) {
                     {missingIngredients.length === 0 && (
                       <tr>
                         <td colSpan="4" className="py-4 text-center italic text-on-surface-variant">
-                          Sin requerimientos semanales.
+                          Sin requerimientos para {requirementDay}. Cargue ingredientes por ración en el menú del día.
                         </td>
                       </tr>
                     )}
@@ -480,7 +566,7 @@ export default function LogisticsMenus({ token }) {
                   className="w-full py-2 bg-primary text-on-primary font-bold rounded-xl text-xs hover:opacity-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-sm">shopping_cart_checkout</span>
-                  Solicitar Faltantes al Almacén
+                  Solicitar Requerimiento Diario
                 </button>
               )}
             </div>
@@ -617,15 +703,15 @@ export default function LogisticsMenus({ token }) {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-on-surface-variant block mb-1">Ingredientes Requeridos</label>
+                <label className="text-xs font-bold text-on-surface-variant block mb-1">Ingredientes por Ración</label>
                 <textarea 
                   value={editIngredients} 
                   onChange={(e) => setEditIngredients(e.target.value)} 
                   className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary h-24 resize-none font-mono"
-                  placeholder="Ej: Harina PAN: 5, Pollo: 2 kg, Aceite: 1 l&#10;(Separados por comas)"
+                  placeholder="Ej: Arroz: 0.12 kg, Pollo: 0.18 kg, Aceite: 0.02 l&#10;(Cantidad para una sola comida/ración)"
                 />
                 <span className="text-[9px] text-on-surface-variant font-medium mt-1 block leading-tight">
-                  Coloca el nombre del ingrediente seguido por dos puntos y la cantidad para que se calcule el reabastecimiento automáticamente.
+                  Coloca cantidades para 1 ración. El sistema multiplica por residentes activos + personal de apoyo y genera el requerimiento diario.
                 </span>
               </div>
 

@@ -12,6 +12,7 @@ import Registration from './pages/Registration';
 import BedsManagement from './pages/BedsManagement';
 import Triage from './pages/Triage';
 import MedicalAlerts from './pages/MedicalAlerts';
+import InventarioSalud from './pages/InventarioSalud';
 import MedicalReport from './pages/MedicalReport';
 import Inventory from './pages/Inventory';
 import WarehouseRequests from './pages/WarehouseRequests';
@@ -25,6 +26,7 @@ import Residents from './pages/Residents';
 import ControlAcceso from './pages/ControlAcceso';
 import Donaciones from './pages/Donaciones';
 import Carnetizacion from './pages/Carnetizacion';
+import CarnetizacionPersonal from './pages/CarnetizacionPersonal';
 import ConsolidatedReports from './pages/ConsolidatedReports';
 
 const hasAccess = (user, path, refugioId) => {
@@ -101,6 +103,7 @@ export default function App() {
 
   // Selected Sede (Context)
   const [selectedRefugio, setSelectedRefugio] = useState(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Sync token with localStorage
   useEffect(() => {
@@ -263,6 +266,7 @@ export default function App() {
   const BedsWrapper = () => <BedsManagement token={token} />;
   const TriageWrapper = () => <Triage token={token} />;
   const MedicalAlertsWrapper = () => <MedicalAlerts token={token} />;
+  const InventarioSaludWrapper = () => <InventarioSalud token={token} />;
   const MedicalReportWrapper = () => <MedicalReport token={token} />;
   const InventoryWrapper = () => <Inventory token={token} />;
   const WarehouseRequestsWrapper = () => <WarehouseRequests token={token} />;
@@ -274,6 +278,7 @@ export default function App() {
   const ConfiguracionWrapper = () => <Configuracion token={token} user={user} />;
   const ResidentsWrapper = () => <Residents token={token} />;
   const CarnetizacionWrapper = () => <Carnetizacion token={token} selectedRefugio={selectedRefugio} />;
+  const CarnetizacionPersonalWrapper = () => <CarnetizacionPersonal token={token} selectedRefugio={selectedRefugio} />;
   const ControlAccesoWrapper = () => <ControlAcceso token={token} selectedRefugio={selectedRefugio} />;
   const DonacionesWrapper = () => <Donaciones token={token} selectedRefugio={selectedRefugio} />;
   const ConsolidatedReportsWrapper = () => <ConsolidatedReports token={token} />;
@@ -302,12 +307,18 @@ export default function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-background text-on-surface flex flex-col">
-        <Header user={user} selectedRefugio={selectedRefugio} />
+        <Header user={user} selectedRefugio={selectedRefugio} onMenuClick={() => setMobileMenuOpen(true)} />
         
         <div className="flex-1 flex pt-20">
-          <Sidebar user={user} selectedRefugio={selectedRefugio} onLogout={handleLogout} />
+          <Sidebar
+            user={user}
+            selectedRefugio={selectedRefugio}
+            onLogout={handleLogout}
+            mobileOpen={mobileMenuOpen}
+            onMobileClose={() => setMobileMenuOpen(false)}
+          />
           
-          <main className="flex-1 lg:ml-[280px] p-6 overflow-y-auto">
+          <main className="flex-1 lg:ml-[280px] p-4 md:p-6 overflow-y-auto min-w-0">
             <Routes>
               {/* Sede Selection Landing */}
               <Route 
@@ -321,6 +332,7 @@ export default function App() {
               <Route path="/refugio/:refugioId/camas" element={<ProtectedRoute element={<BedsWrapper />} path="/refugio/:refugioId/camas" />} />
               <Route path="/refugio/:refugioId/medico/triaje" element={<ProtectedRoute element={<TriageWrapper />} path="/refugio/:refugioId/medico/triaje" />} />
               <Route path="/refugio/:refugioId/medico/insumos" element={<ProtectedRoute element={<MedicalAlertsWrapper />} path="/refugio/:refugioId/medico/insumos" />} />
+              <Route path="/refugio/:refugioId/medico/inventario" element={<ProtectedRoute element={<InventarioSaludWrapper />} path="/refugio/:refugioId/medico/inventario" />} />
               <Route path="/refugio/:refugioId/medico/reporte" element={<ProtectedRoute element={<MedicalReportWrapper />} path="/refugio/:refugioId/medico/reporte" />} />
               
               <Route path="/refugio/:refugioId/triaje" element={<Navigate to={selectedRefugio ? `/refugio/${selectedRefugio.id}/medico/triaje` : '/sedes'} replace />} />
@@ -343,6 +355,8 @@ export default function App() {
               <Route path="/refugio/:refugioId/configuracion" element={<ProtectedRoute element={<ConfiguracionWrapper />} path="/refugio/:refugioId/configuracion" />} />
               <Route path="/refugio/:refugioId/residentes" element={<ProtectedRoute element={<ResidentsWrapper />} path="/refugio/:refugioId/residentes" />} />
               <Route path="/refugio/:refugioId/carnetizacion" element={<ProtectedRoute element={<CarnetizacionWrapper />} path="/refugio/:refugioId/carnetizacion" />} />
+              <Route path="/refugio/:refugioId/carnetizacion/residentes" element={<ProtectedRoute element={<CarnetizacionWrapper />} path="/refugio/:refugioId/carnetizacion/residentes" />} />
+              <Route path="/refugio/:refugioId/carnetizacion/personal" element={<ProtectedRoute element={<CarnetizacionPersonalWrapper />} path="/refugio/:refugioId/carnetizacion/personal" />} />
               <Route path="/refugio/:refugioId/control-acceso" element={<ProtectedRoute element={<ControlAccesoWrapper />} path="/refugio/:refugioId/control-acceso" />} />
               <Route path="/refugio/:refugioId/donaciones" element={<ProtectedRoute element={<DonacionesWrapper />} path="/refugio/:refugioId/donaciones" />} />
               <Route path="/reportes-consolidados" element={<ProtectedRoute element={<ConsolidatedReportsWrapper />} path="/reportes-consolidados" />} />

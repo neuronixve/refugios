@@ -535,7 +535,7 @@ export default function Carnetizacion({ token, selectedRefugio }) {
         <div className="lg:col-span-8 bg-surface-container-low border border-outline-variant rounded-2xl p-6 shadow-xs flex flex-col gap-4 print:p-0 print:border-none print:bg-transparent">
           <div className="flex justify-between items-center print:hidden border-b border-outline-variant/30 pb-3">
             <h3 className="text-xs font-bold text-on-surface uppercase tracking-wider flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-sm text-primary">view_grid</span>
+              <span className="material-symbols-outlined text-sm text-primary">grid_view</span>
               Previsualización de Plancha de Impresión (3 Columnas)
             </h3>
             <span className="text-[10px] text-on-surface-variant font-bold">Distribución: 9 Carnets por Hoja</span>

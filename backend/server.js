@@ -42,6 +42,7 @@ async function initDb() {
     await db.query("ALTER TABLE refugios ADD COLUMN IF NOT EXISTS staff_config TEXT DEFAULT '{}'");
     await db.query("ALTER TABLE menus ADD COLUMN IF NOT EXISTS diets_json TEXT DEFAULT '{}'");
     await db.query('ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS details TEXT');
+    await db.query("ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS unit VARCHAR(20) DEFAULT 'Unidades'");
 
     // Convert inventory quantities to Numeric to support decimals
     await db.query('ALTER TABLE inventory ALTER COLUMN quantity TYPE NUMERIC(10,2)');
@@ -114,6 +115,20 @@ const restrictSupervisorModify = (req, res, next) => {
     }
   }
   next();
+};
+
+const getCurrentMealWindow = (date = new Date()) => {
+  const minutes = date.getHours() * 60 + date.getMinutes();
+  if (minutes >= 6 * 60 && minutes <= 11 * 60) {
+    return { mealType: 'Desayuno', label: '06:00 AM - 11:00 AM' };
+  }
+  if (minutes >= 11 * 60 + 30 && minutes <= 16 * 60 + 30) {
+    return { mealType: 'Almuerzo', label: '11:30 AM - 04:30 PM' };
+  }
+  if (minutes >= 17 * 60 + 30 && minutes <= 22 * 60) {
+    return { mealType: 'Cena', label: '05:30 PM - 10:00 PM' };
+  }
+  return null;
 };
 
 // --- RUTAS DE AUTENTICACIÓN ---
@@ -429,6 +444,23 @@ app.get('/api/refugios/:id', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al obtener el refugio.' });
+  }
+});
+
+app.get('/api/refugios/:refugio_id/staff-count', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  try {
+    const result = await db.query(
+      `SELECT COUNT(*)::int AS count
+       FROM users
+       WHERE refugio_id = $1
+       AND role NOT IN ('admin', 'supervisor')`,
+      [parseInt(refugio_id)]
+    );
+    res.json({ count: result.rows[0]?.count || 0 });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener conteo de personal.' });
   }
 });
 
@@ -989,9 +1021,16 @@ app.get('/api/refugios/:refugio_id/meals/attendance', authenticateToken, async (
 });
 
 app.post('/api/meals/attendance', authenticateToken, async (req, res) => {
-  const { document_id, resident_id, refugio_id, meal_type } = req.body;
-  if ((!document_id && !resident_id) || !refugio_id || !meal_type) {
-    return res.status(400).json({ error: 'Cédula/Identificador, Refugio y Tipo de comida son requeridos.' });
+  const { document_id, resident_id, refugio_id } = req.body;
+  if ((!document_id && !resident_id) || !refugio_id) {
+    return res.status(400).json({ error: 'Cédula/Identificador y Refugio son requeridos.' });
+  }
+
+  const currentMeal = getCurrentMealWindow();
+  if (!currentMeal) {
+    return res.status(400).json({
+      error: 'Fuera del horario de servicio de comida. Horarios: Desayuno 06:00-11:00, Almuerzo 11:30-16:30, Cena 17:30-22:00.'
+    });
   }
 
   try {
@@ -1010,7 +1049,7 @@ app.post('/api/meals/attendance', authenticateToken, async (req, res) => {
     const result = await db.query(
       `INSERT INTO meal_attendance (resident_id, refugio_id, meal_type)
        VALUES ($1, $2, $3) RETURNING *`,
-      [resident.id, refugio_id, meal_type]
+      [resident.id, refugio_id, currentMeal.mealType]
     );
     res.status(201).json({ attendance: result.rows[0], resident });
   } catch (err) {
@@ -1461,15 +1500,15 @@ app.get('/api/refugios/:refugio_id/warehouse-requests', authenticateToken, async
 // Crear solicitud
 app.post('/api/refugios/:refugio_id/warehouse-requests', authenticateToken, async (req, res) => {
   const { refugio_id } = req.params;
-  const { area, item_name, quantity, details } = req.body;
+  const { area, item_name, quantity, details, unit } = req.body;
   if (!area || !item_name || !quantity) {
     return res.status(400).json({ error: 'Área, insumo y cantidad son requeridos.' });
   }
   try {
     const result = await db.query(
-      `INSERT INTO warehouse_requests (refugio_id, area, item_name, quantity, details)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [parseInt(refugio_id), area, item_name, parseInt(quantity), details || null]
+      `INSERT INTO warehouse_requests (refugio_id, area, item_name, quantity, details, unit)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [parseInt(refugio_id), area, item_name, parseFloat(quantity), details || null, unit || 'Unidades']
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1509,17 +1548,29 @@ app.put('/api/refugios/:refugio_id/warehouse-requests/:id', authenticateToken, a
       if (reqResult.rows.length > 0) {
         const request = reqResult.rows[0];
 
-        // 1. Find or create Cocina depósito
-        let cocinaDepId = null;
-        const cocDepRes = await db.query("SELECT id FROM depositos WHERE name ILIKE '%cocina%' AND refugio_id = $1 LIMIT 1", [parseInt(refugio_id)]);
-        if (cocDepRes.rows.length > 0) {
-          cocinaDepId = cocDepRes.rows[0].id;
+        const isMedicalRequest = (request.area || '').toLowerCase().includes('médico') || (request.area || '').toLowerCase().includes('medico');
+        const targetDepositoName = isMedicalRequest ? 'Servicio Médico' : 'Cocina';
+        const targetDepositoSearch = isMedicalRequest ? '%médico%' : '%cocina%';
+        const targetDepositoSearchAlt = isMedicalRequest ? '%medico%' : '%cocina%';
+        const targetDepositoDescription = isMedicalRequest
+          ? 'Depósito local del servicio médico para insumos de salud'
+          : 'Depósito local de cocina para raciones diarias';
+        const fallbackCategory = isMedicalRequest ? 'Medicinas' : 'Alimentos';
+
+        // 1. Find or create destination service depósito
+        let targetDepId = null;
+        const depRes = await db.query(
+          "SELECT id FROM depositos WHERE refugio_id = $1 AND (name ILIKE $2 OR name ILIKE $3) LIMIT 1",
+          [parseInt(refugio_id), targetDepositoSearch, targetDepositoSearchAlt]
+        );
+        if (depRes.rows.length > 0) {
+          targetDepId = depRes.rows[0].id;
         } else {
           const newDep = await db.query(
-            "INSERT INTO depositos (refugio_id, name, description, capacity_percent) VALUES ($1, 'Cocina', 'Depósito local de cocina para raciones diarias', 100) RETURNING id",
-            [parseInt(refugio_id)]
+            "INSERT INTO depositos (refugio_id, name, description, capacity_percent) VALUES ($1, $2, $3, 100) RETURNING id",
+            [parseInt(refugio_id), targetDepositoName, targetDepositoDescription]
           );
-          cocinaDepId = newDep.rows[0].id;
+          targetDepId = newDep.rows[0].id;
         }
 
         // 2. Prepare items to process (supports both consolidated details and single item)
@@ -1549,7 +1600,7 @@ app.put('/api/refugios/:refugio_id/warehouse-requests/:id', authenticateToken, a
           // Find the actual warehouse item to deduct from (and get its unit/category)
           let warehouseItem = null;
           let findQuery = `SELECT * FROM inventory WHERE refugio_id = $1 AND (item_name ILIKE $2 OR item_name ILIKE $3 OR $4 ILIKE '%' || item_name || '%') AND (deposito_id != $5 OR deposito_id IS NULL)`;
-          let findParams = [parseInt(refugio_id), `%${cleanName}%`, `%${item.name}%`, item.name, cocinaDepId];
+          let findParams = [parseInt(refugio_id), `%${cleanName}%`, `%${item.name}%`, item.name, targetDepId];
           
           if (deposito_id) {
             findQuery += ` AND deposito_id = $6`;
@@ -1563,7 +1614,7 @@ app.put('/api/refugios/:refugio_id/warehouse-requests/:id', authenticateToken, a
           }
 
           const targetUnit = warehouseItem ? warehouseItem.unit : (item.unit || 'Unidades');
-          const targetCategory = warehouseItem ? warehouseItem.category : 'Alimentos';
+          const targetCategory = warehouseItem ? warehouseItem.category : fallbackCategory;
 
           // Deduct from warehouse
           if (warehouseItem) {
@@ -1576,16 +1627,16 @@ app.put('/api/refugios/:refugio_id/warehouse-requests/:id', authenticateToken, a
             );
           }
 
-          // Add to kitchen
-          const existKitchen = await db.query(
+          // Add to destination service depósito
+          const existingTargetItem = await db.query(
             "SELECT id, quantity FROM inventory WHERE refugio_id = $1 AND (item_name ILIKE $2 OR item_name ILIKE $3 OR $4 ILIKE '%' || item_name || '%') AND deposito_id = $5",
-            [parseInt(refugio_id), `%${cleanName}%`, `%${item.name}%`, item.name, cocinaDepId]
+            [parseInt(refugio_id), `%${cleanName}%`, `%${item.name}%`, item.name, targetDepId]
           );
 
-          if (existKitchen.rows.length > 0) {
+          if (existingTargetItem.rows.length > 0) {
             await db.query(
               "UPDATE inventory SET quantity = quantity + $1, status = CASE WHEN (quantity + $1) <= min_threshold THEN 'Stock Crítico' ELSE 'Stock Suficiente' END, updated_at = NOW() WHERE id = $2",
-              [parseFloat(item.quantity) || 0, existKitchen.rows[0].id]
+              [parseFloat(item.quantity) || 0, existingTargetItem.rows[0].id]
             );
           } else {
             const qtyVal = parseFloat(item.quantity) || 0;
@@ -1593,7 +1644,7 @@ app.put('/api/refugios/:refugio_id/warehouse-requests/:id', authenticateToken, a
             await db.query(
               `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id)
                VALUES ($1, $2, $3, $4, 5, $5, $6, $7)`,
-              [parseInt(refugio_id), cleanName, targetCategory, qtyVal, targetUnit, statusStr, cocinaDepId]
+              [parseInt(refugio_id), cleanName, targetCategory, qtyVal, targetUnit, statusStr, targetDepId]
             );
           }
         }

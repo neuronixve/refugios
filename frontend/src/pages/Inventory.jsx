@@ -127,8 +127,9 @@ export default function Inventory({ token, tab }) {
   const getConsolidatedInventory = () => {
     const grouped = {};
     inventory.forEach(item => {
-      // Exclude items in Cocina deposit if they should only be in Comedor & Logística!
-      if (item.deposito_name && item.deposito_name.toLowerCase().includes('cocina')) {
+      // Exclude items already transferred to local service deposits.
+      const depositoName = (item.deposito_name || '').toLowerCase();
+      if (depositoName.includes('cocina') || depositoName.includes('médico') || depositoName.includes('medico') || depositoName.includes('salud')) {
         return;
       }
 

@@ -2,15 +2,32 @@ import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 
 const ROLE_LABELS = {
-  admin: 'ADMINISTRADOR',
-  gerente: 'GERENTE DE SEDE',
-  medico: 'PERSONAL MÉDICO',
-  seguridad: 'PERSONAL DE SEGURIDAD',
-  cocina: 'PERSONAL COCINA',
-  almacen: 'PERSONAL ALMACÉN',
-  registro: 'PERSONAL REGISTRO',
-  apoyo: 'APOYO SOCIAL'
+  supervisor: 'Supervisor Global (Reportes/Sedes)',
+  gerente: 'Gerente de Sede (Administrador de Sede)',
+  medico: 'Personal Médico (Triaje y Reporte)',
+  seguridad: 'Personal de Seguridad (Control QR)',
+  cocina: 'Personal Cocina (Comedor)',
+  almacen: 'Personal Almacén',
+  registro: 'Personal Registro (Recepción/Camas)',
+  apoyo: 'Apoyo Social',
+  admin: 'Administrador General'
 };
+
+const ROLE_OPTIONS = [
+  { value: 'supervisor', label: ROLE_LABELS.supervisor },
+  { value: 'gerente', label: ROLE_LABELS.gerente },
+  { value: 'medico', label: ROLE_LABELS.medico },
+  { value: 'seguridad', label: ROLE_LABELS.seguridad },
+  { value: 'cocina', label: ROLE_LABELS.cocina },
+  { value: 'almacen', label: ROLE_LABELS.almacen },
+  { value: 'registro', label: ROLE_LABELS.registro },
+  { value: 'apoyo', label: ROLE_LABELS.apoyo }
+];
+
+const ROLE_ORDER = ROLE_OPTIONS.reduce((order, role, index) => {
+  order[role.value] = index;
+  return order;
+}, { admin: ROLE_OPTIONS.length });
 
 export default function CarnetizacionPersonal({ token, selectedRefugio }) {
   const { refugioId } = useParams();
@@ -23,6 +40,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [printFilter, setPrintFilter] = useState('pending'); // 'pending', 'printed', 'all'
+  const [roleFilter, setRoleFilter] = useState('all');
   const [sortBy, setSortBy] = useState('role'); // 'role', 'name'
 
   const API_BASE = window.location.hostname === 'localhost'
@@ -65,10 +83,13 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
   };
 
   const handleToggleAll = () => {
-    if (selectedIds.length === filteredUsers.length) {
-      setSelectedIds([]);
+    const visibleIds = filteredUsers.map(u => u.id);
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
+
+    if (allVisibleSelected) {
+      setSelectedIds(selectedIds.filter(id => !visibleIds.includes(id)));
     } else {
-      setSelectedIds(filteredUsers.map(u => u.id));
+      setSelectedIds([...new Set([...selectedIds, ...visibleIds])]);
     }
   };
 
@@ -80,6 +101,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
       if (printFilter === 'printed') return isPrinted;
       return true;
     })
+    .filter(u => roleFilter === 'all' || u.role === roleFilter)
     .filter(u => {
       const fullName = (u.name || '').toLowerCase();
       const email = (u.email || '').toLowerCase();
@@ -88,9 +110,10 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
     })
     .sort((a, b) => {
       if (sortBy === 'role') {
-        const roleA = ROLE_LABELS[a.role] || a.role;
-        const roleB = ROLE_LABELS[b.role] || b.role;
-        return roleA.localeCompare(roleB);
+        const roleA = ROLE_ORDER[a.role] ?? 99;
+        const roleB = ROLE_ORDER[b.role] ?? 99;
+        if (roleA !== roleB) return roleA - roleB;
+        return (a.name || '').localeCompare(b.name || '');
       } else {
         const nameA = (a.name || '').toLowerCase();
         const nameB = (b.name || '').toLowerCase();
@@ -99,11 +122,11 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
     });
 
   const handleMarkAsPrinted = async () => {
-    if (selectedIds.length === 0) return;
+    if (selectedUsers.length === 0) return;
     setUpdating(true);
     try {
-      for (const id of selectedIds) {
-        await fetch(`${API_BASE}/users/${id}/print`, {
+      for (const user of selectedUsers) {
+        await fetch(`${API_BASE}/users/${user.id}/print`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -127,11 +150,20 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
   const getGroupedUsers = () => {
     const groups = {};
     filteredUsers.forEach(u => {
-      const roleLabel = ROLE_LABELS[u.role] || u.role.toUpperCase();
+      const roleLabel = ROLE_LABELS[u.role] || u.role;
       if (!groups[roleLabel]) groups[roleLabel] = [];
       groups[roleLabel].push(u);
     });
     return groups;
+  };
+
+  const getRoleCount = (role) => {
+    return users.filter(u => {
+      if (role !== 'all' && u.role !== role) return false;
+      if (printFilter === 'pending') return !u.card_printed;
+      if (printFilter === 'printed') return !!u.card_printed;
+      return true;
+    }).length;
   };
 
   const renderUserCheckItem = (u) => {
@@ -154,7 +186,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
               {u.card_printed ? '🟢 Impreso' : '🔴 Pendiente'}
             </span>
           </div>
-          <span className="text-[9px] text-on-surface-variant block mt-0.5 truncate">{u.email} | Rol: {ROLE_LABELS[u.role] || u.role.toUpperCase()}</span>
+          <span className="text-[9px] text-on-surface-variant block mt-0.5 truncate">{u.email} | Rol: {ROLE_LABELS[u.role] || u.role}</span>
         </div>
       </div>
     );
@@ -252,7 +284,9 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
     );
   };
 
-  const selectedUsers = users.filter(u => selectedIds.includes(u.id));
+  const visibleIds = filteredUsers.map(u => u.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
+  const selectedUsers = filteredUsers.filter(u => selectedIds.includes(u.id));
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -354,6 +388,26 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
               </button>
             </div>
 
+            {/* Role Filter */}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex justify-between items-center">
+                <span className="font-bold text-on-surface-variant text-xs">Rol del Personal:</span>
+                <span className="text-[10px] text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full font-bold">
+                  {getRoleCount(roleFilter)} registros
+                </span>
+              </div>
+              <select
+                value={roleFilter}
+                onChange={(e) => setRoleFilter(e.target.value)}
+                className="w-full bg-surface-container border border-outline-variant rounded-xl p-2.5 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-primary font-bold"
+              >
+                <option value="all">-- Todos los Roles --</option>
+                {ROLE_OPTIONS.map(role => (
+                  <option key={role.value} value={role.value}>{role.label}</option>
+                ))}
+              </select>
+            </div>
+
             {/* Sort Dropdown */}
             <div className="flex justify-between items-center text-xs">
               <span className="font-bold text-on-surface-variant">Agrupar / Ordenar:</span>
@@ -384,7 +438,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
               <label className="flex items-center gap-2 font-bold text-on-surface cursor-pointer">
                 <input 
                   type="checkbox" 
-                  checked={filteredUsers.length > 0 && selectedIds.length === filteredUsers.length}
+                  checked={allVisibleSelected}
                   onChange={handleToggleAll}
                   className="w-4 h-4 rounded text-primary focus:ring-primary"
                 />
