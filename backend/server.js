@@ -249,7 +249,7 @@ app.get('/api/users', authenticateToken, async (req, res) => {
     if (req.user.role === 'admin') {
       // Superusuario ve todos los usuarios
       queryText = `
-        SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, u.is_active, r.name as refugio_name 
+        SELECT u.id, u.name, u.email, u.role, u.document_id, NULL as photo, u.staff_function, u.refugio_id, u.card_printed, u.is_active, r.name as refugio_name
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
         WHERE COALESCE(u.is_active, TRUE) = TRUE
@@ -258,7 +258,7 @@ app.get('/api/users', authenticateToken, async (req, res) => {
     } else if (req.user.role === 'supervisor') {
       // Supervisor ve solo los gerentes de cada sede
       queryText = `
-        SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, u.is_active, r.name as refugio_name 
+        SELECT u.id, u.name, u.email, u.role, u.document_id, NULL as photo, u.staff_function, u.refugio_id, u.card_printed, u.is_active, r.name as refugio_name
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
         WHERE u.role = 'gerente' AND COALESCE(u.is_active, TRUE) = TRUE
@@ -267,7 +267,7 @@ app.get('/api/users', authenticateToken, async (req, res) => {
     } else if (req.user.role === 'gerente' || req.user.role === 'registro') {
       // Gerente y registro ven todo el personal operativo asignado a su sede.
       queryText = `
-        SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, u.is_active, r.name as refugio_name 
+        SELECT u.id, u.name, u.email, u.role, u.document_id, NULL as photo, u.staff_function, u.refugio_id, u.card_printed, u.is_active, r.name as refugio_name
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
         WHERE u.refugio_id = $1 AND COALESCE(u.is_active, TRUE) = TRUE

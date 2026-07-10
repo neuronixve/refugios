@@ -84,15 +84,14 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
     setLoading(true);
     setFormError('');
     try {
-      const res = await fetchWithTimeout(`${API_BASE}/users`, {
+      const res = await fetchWithTimeout(`${API_BASE}/refugios/${refugioId}/staff`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await readApiResponse(res);
       if (!res.ok) {
         throw new Error(data.error || 'No se pudo cargar el personal de la sede.');
       }
-      // Filter users for the current campamento temporal
-      const activeStaff = data.filter(u => u.refugio_id && u.refugio_id.toString() === refugioId.toString());
+      const activeStaff = data.filter(u => u.is_active !== false);
       setUsers(activeStaff);
 
       // Auto-select pending ones
