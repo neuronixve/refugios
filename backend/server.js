@@ -36,6 +36,8 @@ async function initDb() {
     await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS document_id VARCHAR(30)');
     await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS photo TEXT');
     await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_function VARCHAR(120)');
+    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE');
+    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP');
     await db.query('ALTER TABLE meal_attendance ADD COLUMN IF NOT EXISTS staff_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
     await db.query("ALTER TABLE meal_attendance ADD COLUMN IF NOT EXISTS person_type VARCHAR(20) DEFAULT 'resident'");
     await db.query('ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS staff_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
@@ -168,7 +170,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   try {
-    const userRes = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    const userRes = await db.query('SELECT * FROM users WHERE email = $1 AND COALESCE(is_active, TRUE) = TRUE', [email]);
     if (userRes.rows.length === 0) {
       return res.status(401).json({ error: 'Credenciales incorrectas.' });
     }
@@ -215,7 +217,7 @@ app.use('/api', (req, res, next) => {
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
   try {
     const userRes = await db.query(
-      'SELECT id, name, email, role, refugio_id FROM users WHERE id = $1',
+      'SELECT id, name, email, role, refugio_id FROM users WHERE id = $1 AND COALESCE(is_active, TRUE) = TRUE',
       [req.user.id]
     );
     if (userRes.rows.length === 0) {
@@ -239,27 +241,28 @@ app.get('/api/users', authenticateToken, async (req, res) => {
     if (req.user.role === 'admin') {
       // Superusuario ve todos los usuarios
       queryText = `
-        SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, r.name as refugio_name 
+        SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, u.is_active, r.name as refugio_name 
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
+        WHERE COALESCE(u.is_active, TRUE) = TRUE
         ORDER BY u.id DESC
       `;
     } else if (req.user.role === 'supervisor') {
       // Supervisor ve solo los gerentes de cada sede
       queryText = `
-        SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, r.name as refugio_name 
+        SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, u.is_active, r.name as refugio_name 
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
-        WHERE u.role = 'gerente'
+        WHERE u.role = 'gerente' AND COALESCE(u.is_active, TRUE) = TRUE
         ORDER BY u.id DESC
       `;
     } else if (req.user.role === 'gerente' || req.user.role === 'registro') {
       // Gerente y registro ven el personal asignado a su sede (excluyéndose a sí mismos)
       queryText = `
-        SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, r.name as refugio_name 
+        SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, u.is_active, r.name as refugio_name 
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
-        WHERE u.refugio_id = $1 AND u.id != $2
+        WHERE u.refugio_id = $1 AND u.id != $2 AND COALESCE(u.is_active, TRUE) = TRUE
         ORDER BY u.id DESC
       `;
       queryParams = [req.user.refugio_id, req.user.id];
@@ -325,9 +328,9 @@ app.post('/api/users', authenticateToken, async (req, res) => {
     }
 
     const result = await db.query(
-      `INSERT INTO users (name, email, password_hash, role, refugio_id, document_id, photo, staff_function)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, name, email, role, refugio_id, document_id, photo, staff_function, card_printed`,
+      `INSERT INTO users (name, email, password_hash, role, refugio_id, document_id, photo, staff_function, is_active, deleted_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, NULL)
+       RETURNING id, name, email, role, refugio_id, document_id, photo, staff_function, card_printed, is_active`,
       [name, email, passwordHash, role, targetRefugioId || null, cleanDocumentId || null, photo || null, cleanStaffFunction || null]
     );
 
@@ -422,7 +425,7 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
       if (targetUser.role !== 'gerente') {
         return res.status(403).json({ error: 'Supervisor solo puede eliminar usuarios con rol Gerente.' });
       }
-    } else if (req.user.role === 'gerente') {
+    } else if (req.user.role === 'gerente' || req.user.role === 'registro') {
       if (parseInt(targetUser.refugio_id) !== parseInt(req.user.refugio_id)) {
         return res.status(403).json({ error: 'No puedes eliminar personal de otra sede.' });
       }
@@ -433,8 +436,8 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'No autorizado para eliminar usuarios.' });
     }
 
-    await db.query('DELETE FROM users WHERE id = $1', [id]);
-    res.json({ message: 'Usuario eliminado exitosamente.' });
+    await db.query('UPDATE users SET is_active = FALSE, deleted_at = NOW() WHERE id = $1', [id]);
+    res.json({ message: 'Usuario desactivado exitosamente.' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al eliminar usuario.' });
@@ -501,7 +504,8 @@ app.get('/api/refugios/:refugio_id/staff-count', authenticateToken, async (req, 
       `SELECT COUNT(*)::int AS count
        FROM users
        WHERE refugio_id = $1
-       AND role NOT IN ('admin', 'supervisor')`,
+       AND role NOT IN ('admin', 'supervisor')
+       AND COALESCE(is_active, TRUE) = TRUE`,
       [parseInt(refugio_id)]
     );
     res.json({ count: result.rows[0]?.count || 0 });
@@ -515,10 +519,11 @@ app.get('/api/refugios/:refugio_id/staff', authenticateToken, async (req, res) =
   const { refugio_id } = req.params;
   try {
     const result = await db.query(
-      `SELECT id, name, email, role, document_id, photo, staff_function, refugio_id, card_printed
+      `SELECT id, name, email, role, document_id, photo, staff_function, refugio_id, card_printed, is_active
        FROM users
        WHERE refugio_id = $1
        AND role NOT IN ('admin', 'supervisor')
+       AND COALESCE(is_active, TRUE) = TRUE
        ORDER BY name ASC`,
       [parseInt(refugio_id)]
     );

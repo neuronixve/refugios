@@ -171,6 +171,10 @@ export default function Sidebar({ user, selectedRefugio, onLogout, mobileOpen = 
                       <span className="material-symbols-outlined text-xs">assignment_ind</span>
                       <span>Añadir Personal</span>
                     </NavLink>
+                    <NavLink to={`/refugio/${selectedRefugio.id}/carnetizacion/personal/listado`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
+                      <span className="material-symbols-outlined text-xs">manage_accounts</span>
+                      <span>Listado Personal</span>
+                    </NavLink>
                   </div>
                 )}
               </div>

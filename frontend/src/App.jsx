@@ -28,6 +28,7 @@ import ControlAcceso from './pages/ControlAcceso';
 import Donaciones from './pages/Donaciones';
 import Carnetizacion from './pages/Carnetizacion';
 import CarnetizacionPersonal from './pages/CarnetizacionPersonal';
+import PersonalList from './pages/PersonalList';
 import ConsolidatedReports from './pages/ConsolidatedReports';
 
 const hasAccess = (user, path, refugioId) => {
@@ -72,7 +73,7 @@ const hasAccess = (user, path, refugioId) => {
 const getDefaultPath = (user, refugioId) => {
   if (!user) return '/sedes';
   const role = user.role;
-  const rid = refugioId || user.refugio_id || '';
+  const rid = user.refugio_id || refugioId || '';
   
   if (role === 'admin') return rid ? `/refugio/${rid}/dashboard` : '/sedes';
   if (role === 'supervisor') return '/sedes';
@@ -281,6 +282,7 @@ export default function App() {
   const ResidentsWrapper = () => <Residents token={token} />;
   const CarnetizacionWrapper = () => <Carnetizacion token={token} selectedRefugio={selectedRefugio} />;
   const CarnetizacionPersonalWrapper = () => <CarnetizacionPersonal token={token} selectedRefugio={selectedRefugio} />;
+  const PersonalListWrapper = () => <PersonalList token={token} />;
   const ControlAccesoWrapper = () => <ControlAcceso token={token} selectedRefugio={selectedRefugio} />;
   const DonacionesWrapper = () => <Donaciones token={token} selectedRefugio={selectedRefugio} />;
   const ConsolidatedReportsWrapper = () => <ConsolidatedReports token={token} />;
@@ -360,6 +362,7 @@ export default function App() {
               <Route path="/refugio/:refugioId/carnetizacion" element={<ProtectedRoute element={<CarnetizacionWrapper />} path="/refugio/:refugioId/carnetizacion" />} />
               <Route path="/refugio/:refugioId/carnetizacion/residentes" element={<ProtectedRoute element={<CarnetizacionWrapper />} path="/refugio/:refugioId/carnetizacion/residentes" />} />
               <Route path="/refugio/:refugioId/carnetizacion/personal" element={<ProtectedRoute element={<CarnetizacionPersonalWrapper />} path="/refugio/:refugioId/carnetizacion/personal" />} />
+              <Route path="/refugio/:refugioId/carnetizacion/personal/listado" element={<ProtectedRoute element={<PersonalListWrapper />} path="/refugio/:refugioId/carnetizacion/personal/listado" />} />
               <Route path="/refugio/:refugioId/control-acceso" element={<ProtectedRoute element={<ControlAccesoWrapper />} path="/refugio/:refugioId/control-acceso" />} />
               <Route path="/refugio/:refugioId/donaciones" element={<ProtectedRoute element={<DonacionesWrapper />} path="/refugio/:refugioId/donaciones" />} />
               <Route path="/reportes-consolidados" element={<ProtectedRoute element={<ConsolidatedReportsWrapper />} path="/reportes-consolidados" />} />

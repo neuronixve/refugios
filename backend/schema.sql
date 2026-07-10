@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS users (
     document_id VARCHAR(30),
     photo TEXT,
     staff_function VARCHAR(120),
+    is_active BOOLEAN DEFAULT TRUE,
+    deleted_at TIMESTAMP,
     refugio_id INTEGER REFERENCES refugios(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT NOW()
 );
