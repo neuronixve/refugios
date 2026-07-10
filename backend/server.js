@@ -31,30 +31,38 @@ async function initDb() {
       console.warn('Advertencia: No se encontró el archivo schema.sql');
     }
 
+    const runMigration = async (description, sql) => {
+      try {
+        await db.query(sql);
+      } catch (err) {
+        console.error(`Error en migración "${description}":`, err.message);
+      }
+    };
+
     // Dynamic alterations (safe to run on every startup)
-    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS refugio_id INTEGER REFERENCES refugios(id) ON DELETE SET NULL');
-    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS document_id VARCHAR(30)');
-    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS photo TEXT');
-    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_function VARCHAR(120)');
-    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE');
-    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP');
-    await db.query('ALTER TABLE meal_attendance ADD COLUMN IF NOT EXISTS staff_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
-    await db.query("ALTER TABLE meal_attendance ADD COLUMN IF NOT EXISTS person_type VARCHAR(20) DEFAULT 'resident'");
-    await db.query('ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS staff_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
-    await db.query("ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS person_type VARCHAR(20) DEFAULT 'resident'");
-    await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS unique_staff_meal_attendance_per_day
+    await runMigration('users.refugio_id', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS refugio_id INTEGER REFERENCES refugios(id) ON DELETE SET NULL');
+    await runMigration('users.document_id', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS document_id VARCHAR(30)');
+    await runMigration('users.photo', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS photo TEXT');
+    await runMigration('users.staff_function', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_function VARCHAR(120)');
+    await runMigration('users.is_active', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE');
+    await runMigration('users.deleted_at', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP');
+    await runMigration('meal_attendance.staff_id', 'ALTER TABLE meal_attendance ADD COLUMN IF NOT EXISTS staff_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
+    await runMigration('meal_attendance.person_type', "ALTER TABLE meal_attendance ADD COLUMN IF NOT EXISTS person_type VARCHAR(20) DEFAULT 'resident'");
+    await runMigration('access_logs.staff_id', 'ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS staff_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
+    await runMigration('access_logs.person_type', "ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS person_type VARCHAR(20) DEFAULT 'resident'");
+    await runMigration('unique staff meal attendance per day', `CREATE UNIQUE INDEX IF NOT EXISTS unique_staff_meal_attendance_per_day
       ON meal_attendance (staff_id, meal_date, meal_type)
       WHERE staff_id IS NOT NULL`);
-    await db.query('ALTER TABLE menus ADD COLUMN IF NOT EXISTS ingredients TEXT');
-    await db.query('ALTER TABLE refugios ADD COLUMN IF NOT EXISTS estado VARCHAR(100)');
-    await db.query('ALTER TABLE refugios ADD COLUMN IF NOT EXISTS image_url TEXT');
-    await db.query('ALTER TABLE incidents ADD COLUMN IF NOT EXISTS involved_residents TEXT DEFAULT \'[]\'');
-    await db.query('ALTER TABLE inventory ADD COLUMN IF NOT EXISTS deposito_id INTEGER REFERENCES depositos(id) ON DELETE SET NULL');
-    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS card_printed BOOLEAN DEFAULT FALSE');
-    await db.query("ALTER TABLE refugios ADD COLUMN IF NOT EXISTS staff_config TEXT DEFAULT '{}'");
-    await db.query("ALTER TABLE menus ADD COLUMN IF NOT EXISTS diets_json TEXT DEFAULT '{}'");
-    await db.query('ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS details TEXT');
-    await db.query("ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS unit VARCHAR(20) DEFAULT 'Unidades'");
+    await runMigration('menus.ingredients', 'ALTER TABLE menus ADD COLUMN IF NOT EXISTS ingredients TEXT');
+    await runMigration('refugios.estado', 'ALTER TABLE refugios ADD COLUMN IF NOT EXISTS estado VARCHAR(100)');
+    await runMigration('refugios.image_url', 'ALTER TABLE refugios ADD COLUMN IF NOT EXISTS image_url TEXT');
+    await runMigration('incidents.involved_residents', 'ALTER TABLE incidents ADD COLUMN IF NOT EXISTS involved_residents TEXT DEFAULT \'[]\'');
+    await runMigration('inventory.deposito_id', 'ALTER TABLE inventory ADD COLUMN IF NOT EXISTS deposito_id INTEGER REFERENCES depositos(id) ON DELETE SET NULL');
+    await runMigration('users.card_printed', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS card_printed BOOLEAN DEFAULT FALSE');
+    await runMigration('refugios.staff_config', "ALTER TABLE refugios ADD COLUMN IF NOT EXISTS staff_config TEXT DEFAULT '{}'");
+    await runMigration('menus.diets_json', "ALTER TABLE menus ADD COLUMN IF NOT EXISTS diets_json TEXT DEFAULT '{}'");
+    await runMigration('warehouse_requests.details', 'ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS details TEXT');
+    await runMigration('warehouse_requests.unit', "ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS unit VARCHAR(20) DEFAULT 'Unidades'");
     await db.query(`
       CREATE TABLE IF NOT EXISTS medication_deliveries (
         id SERIAL PRIMARY KEY,
@@ -74,8 +82,8 @@ async function initDb() {
     `);
 
     // Convert inventory quantities to Numeric to support decimals
-    await db.query('ALTER TABLE inventory ALTER COLUMN quantity TYPE NUMERIC(10,2)');
-    await db.query('ALTER TABLE inventory ALTER COLUMN min_threshold TYPE NUMERIC(10,2)');
+    await runMigration('inventory.quantity numeric', 'ALTER TABLE inventory ALTER COLUMN quantity TYPE NUMERIC(10,2)');
+    await runMigration('inventory.min_threshold numeric', 'ALTER TABLE inventory ALTER COLUMN min_threshold TYPE NUMERIC(10,2)');
     
     console.log('Migraciones dinámicas verificadas y aplicadas.');
   } catch (err) {
@@ -257,15 +265,15 @@ app.get('/api/users', authenticateToken, async (req, res) => {
         ORDER BY u.id DESC
       `;
     } else if (req.user.role === 'gerente' || req.user.role === 'registro') {
-      // Gerente y registro ven el personal asignado a su sede (excluyéndose a sí mismos)
+      // Gerente y registro ven todo el personal operativo asignado a su sede.
       queryText = `
         SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, u.is_active, r.name as refugio_name 
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
-        WHERE u.refugio_id = $1 AND u.id != $2 AND COALESCE(u.is_active, TRUE) = TRUE
+        WHERE u.refugio_id = $1 AND COALESCE(u.is_active, TRUE) = TRUE
         ORDER BY u.id DESC
       `;
-      queryParams = [req.user.refugio_id, req.user.id];
+      queryParams = [req.user.refugio_id];
     } else {
       return res.status(403).json({ error: 'Acceso denegado. No tiene permisos para ver usuarios.' });
     }

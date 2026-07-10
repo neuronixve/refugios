@@ -1,6 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 20000) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const readApiResponse = async (res) => {
+  const responseText = await res.text();
+  try {
+    return responseText ? JSON.parse(responseText) : {};
+  } catch {
+    return {};
+  }
+};
+
 export default function Configuracion({ token, user }) {
   const { refugioId } = useParams();
   
@@ -59,15 +78,22 @@ export default function Configuracion({ token, user }) {
 
   const fetchUsers = async () => {
     setLoadingUsers(true);
+    setError('');
     try {
-      const res = await fetch(`${API_BASE}/users`, {
+      const res = await fetchWithTimeout(`${API_BASE}/users`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) {
-        setUsersList(await res.json());
+      const data = await readApiResponse(res);
+      if (!res.ok) {
+        throw new Error(data.error || 'Error al cargar cuentas de personal.');
       }
+      setUsersList(data);
     } catch (err) {
       console.error(err);
+      setUsersList([]);
+      setError(err.name === 'AbortError'
+        ? 'La API tardó demasiado cargando las cuentas. Revise los logs del backend en producción.'
+        : err.message);
     } finally {
       setLoadingUsers(false);
     }

@@ -13,6 +13,25 @@ const DEFAULT_STAFF_FUNCTIONS = [
   'Voluntariado'
 ];
 
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 20000) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const readApiResponse = async (res) => {
+  const responseText = await res.text();
+  try {
+    return responseText ? JSON.parse(responseText) : {};
+  } catch {
+    return {};
+  }
+};
+
 export default function PersonalList({ token }) {
   const { refugioId } = useParams();
   const [staff, setStaff] = useState([]);
@@ -33,10 +52,10 @@ export default function PersonalList({ token }) {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/users`, {
+      const res = await fetchWithTimeout(`${API_BASE}/users`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const data = await res.json();
+      const data = await readApiResponse(res);
       if (!res.ok) throw new Error(data.error || 'No se pudo cargar el personal.');
       const activeStaff = data.filter(u =>
         u.refugio_id?.toString() === refugioId?.toString() &&
@@ -45,7 +64,10 @@ export default function PersonalList({ token }) {
       );
       setStaff(activeStaff);
     } catch (err) {
-      setError(err.message);
+      setStaff([]);
+      setError(err.name === 'AbortError'
+        ? 'La API tardó demasiado cargando el personal. Revise los logs del backend en producción.'
+        : err.message);
     } finally {
       setLoading(false);
     }
@@ -119,7 +141,7 @@ export default function PersonalList({ token }) {
       const fallbackEmail = cleanDocument
         ? `personal.${cleanDocument.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}.${editingUser.id}@campamento.local`
         : editingUser.email;
-      const res = await fetch(`${API_BASE}/users/${editingUser.id}`, {
+      const res = await fetchWithTimeout(`${API_BASE}/users/${editingUser.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -135,14 +157,16 @@ export default function PersonalList({ token }) {
           staff_function: formData.staff_function.trim(),
           photo: formData.photo
         })
-      });
-      const data = await res.json();
+      }, 30000);
+      const data = await readApiResponse(res);
       if (!res.ok) throw new Error(data.error || 'No se pudo actualizar el personal.');
       setMessage('Personal actualizado correctamente.');
       closeEdit();
       await fetchStaff();
     } catch (err) {
-      setError(err.message);
+      setError(err.name === 'AbortError'
+        ? 'La API tardó demasiado actualizando el personal. Revise los logs del backend en producción.'
+        : err.message);
     } finally {
       setSaving(false);
     }
@@ -154,16 +178,18 @@ export default function PersonalList({ token }) {
     setError('');
     setMessage('');
     try {
-      const res = await fetch(`${API_BASE}/users/${user.id}`, {
+      const res = await fetchWithTimeout(`${API_BASE}/users/${user.id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const data = await res.json();
+      const data = await readApiResponse(res);
       if (!res.ok) throw new Error(data.error || 'No se pudo desactivar el personal.');
       setMessage('Personal desactivado correctamente. Sus registros históricos se conservan.');
       await fetchStaff();
     } catch (err) {
-      setError(err.message);
+      setError(err.name === 'AbortError'
+        ? 'La API tardó demasiado desactivando el personal. Revise los logs del backend en producción.'
+        : err.message);
     }
   };
 

@@ -25,6 +25,25 @@ const DEFAULT_STAFF_FUNCTIONS = [
   'Voluntariado'
 ];
 
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 20000) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const readApiResponse = async (res) => {
+  const responseText = await res.text();
+  try {
+    return responseText ? JSON.parse(responseText) : {};
+  } catch {
+    return {};
+  }
+};
+
 export default function CarnetizacionPersonal({ token, selectedRefugio }) {
   const { refugioId } = useParams();
   
@@ -63,22 +82,29 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
+    setFormError('');
     try {
-      const res = await fetch(`${API_BASE}/users`, {
+      const res = await fetchWithTimeout(`${API_BASE}/users`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) {
-        const data = await res.json();
-        // Filter users for the current campamento temporal
-        const activeStaff = data.filter(u => u.refugio_id && u.refugio_id.toString() === refugioId.toString());
-        setUsers(activeStaff);
-        
-        // Auto-select pending ones
-        const pending = activeStaff.filter(u => !u.card_printed);
-        setSelectedIds(pending.map(u => u.id));
+      const data = await readApiResponse(res);
+      if (!res.ok) {
+        throw new Error(data.error || 'No se pudo cargar el personal de la sede.');
       }
+      // Filter users for the current campamento temporal
+      const activeStaff = data.filter(u => u.refugio_id && u.refugio_id.toString() === refugioId.toString());
+      setUsers(activeStaff);
+
+      // Auto-select pending ones
+      const pending = activeStaff.filter(u => !u.card_printed);
+      setSelectedIds(pending.map(u => u.id));
     } catch (err) {
       console.error("Error fetching users:", err);
+      setUsers([]);
+      setSelectedIds([]);
+      setFormError(err.name === 'AbortError'
+        ? 'La API tardó demasiado cargando el personal. Revise el backend en producción.'
+        : err.message);
     } finally {
       setLoading(false);
     }
@@ -152,7 +178,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
     setCreating(true);
     try {
       const generatedEmail = `personal.${cleanDocument.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}@campamento.local`;
-      const res = await fetch(`${API_BASE}/users`, {
+      const res = await fetchWithTimeout(`${API_BASE}/users`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -168,15 +194,9 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
           role: 'apoyo',
           refugio_id: parseInt(refugioId)
         })
-      });
+      }, 30000);
 
-      const responseText = await res.text();
-      let data = {};
-      try {
-        data = responseText ? JSON.parse(responseText) : {};
-      } catch {
-        data = {};
-      }
+      const data = await readApiResponse(res);
       if (!res.ok) {
         throw new Error(data.error || 'No se pudo registrar el personal. Revise el tamaño de la foto e intente nuevamente.');
       }
@@ -187,7 +207,9 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
       setSelectedIds(prev => [...new Set([data.id, ...prev])]);
       setPrintFilter('pending');
     } catch (err) {
-      setFormError(err.message);
+      setFormError(err.name === 'AbortError'
+        ? 'La API tardó demasiado registrando el personal. Revise los logs del backend en producción.'
+        : err.message);
     } finally {
       setCreating(false);
     }
