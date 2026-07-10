@@ -525,9 +525,12 @@ app.get('/api/refugios/:refugio_id/staff-count', authenticateToken, async (req, 
 
 app.get('/api/refugios/:refugio_id/staff', authenticateToken, async (req, res) => {
   const { refugio_id } = req.params;
+  const includePhoto = req.query.include_photo === 'true';
+  const photoColumn = includePhoto ? 'photo' : 'NULL as photo';
   try {
+    const startedAt = Date.now();
     const result = await db.query(
-      `SELECT id, name, email, role, document_id, photo, staff_function, refugio_id, card_printed, is_active
+      `SELECT id, name, email, role, document_id, ${photoColumn}, staff_function, refugio_id, card_printed, is_active
        FROM users
        WHERE refugio_id = $1
        AND role NOT IN ('admin', 'supervisor')
@@ -535,9 +538,10 @@ app.get('/api/refugios/:refugio_id/staff', authenticateToken, async (req, res) =
        ORDER BY name ASC`,
       [parseInt(refugio_id)]
     );
+    console.log(`Personal de sede ${refugio_id} consultado: ${result.rows.length} registros en ${Date.now() - startedAt}ms`);
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
+    console.error('Error al obtener personal de la sede:', err);
     res.status(500).json({ error: 'Error al obtener personal de la sede.' });
   }
 });

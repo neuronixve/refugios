@@ -84,7 +84,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
     setLoading(true);
     setFormError('');
     try {
-      const res = await fetchWithTimeout(`${API_BASE}/refugios/${refugioId}/staff`, {
+      const res = await fetchWithTimeout(`${API_BASE}/refugios/${refugioId}/staff?include_photo=true`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await readApiResponse(res);
