@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useNavigate, useParams } from 'react-router-dom';
 
 export default function Dashboard({ token, selectedRefugio }) {
@@ -37,10 +38,6 @@ export default function Dashboard({ token, selectedRefugio }) {
   const [employmentStatus, setEmploymentStatus] = useState({ employed: 0, unemployed: 0 });
   const [petsCensus, setPetsCensus] = useState({ countWithPets: 0, list: [] });
   const [totalMinors, setTotalMinors] = useState(0);
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     if (refugioId) {

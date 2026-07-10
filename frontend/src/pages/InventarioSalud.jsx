@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams } from 'react-router-dom';
 
 const HEALTH_UNITS = ['Unidades', 'Cajas', 'Blisters', 'Frascos', 'Viales', 'Ampollas', 'Tabletas', 'Litros', 'Kilos', 'Packs'];
@@ -25,10 +26,6 @@ export default function InventarioSalud({ token }) {
   const [minThreshold, setMinThreshold] = useState(5);
   const [unit, setUnit] = useState('Unidades');
   const [requestDetails, setRequestDetails] = useState('');
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchData();

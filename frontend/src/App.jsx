@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from './config/api';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 
 // Components
@@ -89,9 +90,6 @@ const getDefaultPath = (user, refugioId) => {
 };
 
 export default function App() {
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   const [token, setToken] = useState(localStorage.getItem('token') || '');
   const [user, setUser] = useState(null);

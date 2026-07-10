@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams } from 'react-router-dom';
 
 export default function WarehouseRequests({ token }) {
@@ -14,10 +15,6 @@ export default function WarehouseRequests({ token }) {
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [selectedSourceDeposito, setSelectedSourceDeposito] = useState('');
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchRequests();

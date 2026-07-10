@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams } from 'react-router-dom';
 
 export default function Logistics({ token }) {
@@ -29,10 +30,6 @@ export default function Logistics({ token }) {
   const [donationItem, setDonationItem] = useState('');
   const [donationQty, setDonationQty] = useState(10);
   const [donationUnit, setDonationUnit] = useState('unidades');
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchResidents();

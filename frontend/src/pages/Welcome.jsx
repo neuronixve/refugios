@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useNavigate } from 'react-router-dom';
 
 export default function Welcome({ token, user, onSelectRefugio }) {
@@ -25,10 +26,6 @@ export default function Welcome({ token, user, onSelectRefugio }) {
     'Delta Amacuro', 'Distrito Capital', 'Falcón', 'Guárico', 'Lara', 'Mérida', 'Miranda', 
     'Monagas', 'Nueva Esparta', 'Portuguesa', 'Sucre', 'Táchira', 'Trujillo', 'Vargas', 'Yaracuy', 'Zulia'
   ];
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchStats();

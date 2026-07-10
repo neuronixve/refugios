@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams } from 'react-router-dom';
 
 export default function BedsManagement({ token }) {
@@ -35,10 +36,6 @@ export default function BedsManagement({ token }) {
   
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchBeds();

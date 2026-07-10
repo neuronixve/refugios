@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams } from 'react-router-dom';
 
 export default function Reports({ token }) {
@@ -52,10 +53,6 @@ export default function Reports({ token }) {
     lostHomeFamiliesCount: 0,
     lostHomePeopleCount: 0
   });
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchAllData();

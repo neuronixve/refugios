@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams } from 'react-router-dom';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
@@ -36,10 +37,6 @@ export default function LogisticsAttendance({ token }) {
   // Scanner reference
   const scannerRef = useRef(null);
   const lastScanRef = useRef(0);
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchData();

@@ -9,9 +9,18 @@ const db = require('./db');
 const app = express();
 const PORT = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
+const allowedOrigins = (process.env.CORS_ORIGIN || 'https://venezuelarenacera.com,http://localhost:5173,http://localhost:8080,http://127.0.0.1:8080')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
 
 app.use(cors({
-  origin: ['https://venezuelarenacera.com', 'http://localhost:5173'], // Tu web en producción y local
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
   credentials: true
 }));
 app.use(express.json());

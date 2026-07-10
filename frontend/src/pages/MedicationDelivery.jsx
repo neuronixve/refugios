@@ -1,9 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams } from 'react-router-dom';
-
-const API_BASE = window.location.hostname === 'localhost'
-  ? 'http://localhost:4000/api'
-  : 'https://api.venezuelarenacera.com/api';
 
 const DELIVERY_UNITS = ['Dosis', 'Tabletas', 'Pastillas', 'Cajas', 'Blisters', 'Frascos', 'Viales', 'Ampollas'];
 const DELIVERY_FREQUENCIES = ['Única', 'Semanal', 'Quincenal', 'Mensual', 'Continuada'];

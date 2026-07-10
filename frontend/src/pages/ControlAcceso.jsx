@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams } from 'react-router-dom';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
@@ -39,10 +40,6 @@ export default function ControlAcceso({ token, selectedRefugio }) {
   
   const scannerRef = useRef(null);
   const lastScanRef = useRef({ id: null, time: 0, type: '' });
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchLogs();

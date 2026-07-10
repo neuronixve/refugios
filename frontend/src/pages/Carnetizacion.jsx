@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams } from 'react-router-dom';
 
 export default function Carnetizacion({ token, selectedRefugio }) {
@@ -15,10 +16,6 @@ export default function Carnetizacion({ token, selectedRefugio }) {
   const [selectedIds, setSelectedIds] = useState([]);
   const [printFilter, setPrintFilter] = useState('pending'); // 'pending', 'printed', 'all'
   const [sortBy, setSortBy] = useState('sector'); // 'sector', 'name'
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchData();

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams, useNavigate } from 'react-router-dom';
 
 export default function MedicalAlerts({ token }) {
@@ -10,10 +11,6 @@ export default function MedicalAlerts({ token }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   const handleRequestWarehouse = async (itemName, qty) => {
     setMessage('');

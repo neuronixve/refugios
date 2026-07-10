@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams, useNavigate } from 'react-router-dom';
 
 export default function MedicalReport({ token }) {
@@ -11,10 +12,6 @@ export default function MedicalReport({ token }) {
   const [message, setMessage] = useState('');
   const [showEpidemiologicalModal, setShowEpidemiologicalModal] = useState(false);
   const [epiSearchQuery, setEpiSearchQuery] = useState('');
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchData();

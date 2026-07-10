@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams, useNavigate } from 'react-router-dom';
 
 const VENEZUELA_STATES = [
@@ -137,10 +138,6 @@ export default function Registration({ token }) {
   const [assignments, setAssignments] = useState({}); 
   const [activeAssigneeIndex, setActiveAssigneeIndex] = useState('head');
   const [welcomeKit, setWelcomeKit] = useState(false);
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchFamilies();

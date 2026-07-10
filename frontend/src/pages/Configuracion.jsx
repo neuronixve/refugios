@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams } from 'react-router-dom';
 
 export default function Configuracion({ token, user }) {
   const { refugioId } = useParams();
-  
+
   const [beds, setBeds] = useState([]);
   const [depositos, setDepositos] = useState([]);
   const [loadingBeds, setLoadingBeds] = useState(false);
@@ -25,7 +26,7 @@ export default function Configuracion({ token, user }) {
   const [selectedDepositoId, setSelectedDepositoId] = useState(null);
 
   // RBAC User Management States
-  const [activeTab, setActiveTab] = useState('fisica');
+  const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem('configuracionActiveTab') || 'fisica');
   const [usersList, setUsersList] = useState([]);
   const [refugiosList, setRefugiosList] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -37,10 +38,12 @@ export default function Configuracion({ token, user }) {
   const [newUserRefugioId, setNewUserRefugioId] = useState('');
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [editingUserId, setEditingUserId] = useState(null);
+  const userFormRef = useRef(null);
 
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
+  const setConfigTab = (tab) => {
+    sessionStorage.setItem('configuracionActiveTab', tab);
+    setActiveTab(tab);
+  };
 
   useEffect(() => {
     fetchBeds();
@@ -382,13 +385,18 @@ export default function Configuracion({ token, user }) {
   const handleEditUserClick = (u) => {
     setError('');
     setMessage('');
+    setConfigTab('usuarios');
     setIsEditingUser(true);
     setEditingUserId(u.id);
     setNewUserName(u.name);
     setNewUserEmail(u.email);
     setNewUserPassword('');
     setNewUserRole(u.role);
-    setNewUserRefugioId(u.refugio_id || '');
+    setNewUserRefugioId(u.refugio_id ? String(u.refugio_id) : '');
+
+    window.requestAnimationFrame(() => {
+      userFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   };
 
   const handleCancelEditUser = () => {
@@ -485,7 +493,7 @@ export default function Configuracion({ token, user }) {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      
+
       {/* Header */}
       <header className="mb-8">
         <h2 className="text-2xl font-extrabold text-primary">Configuración General</h2>
@@ -505,15 +513,15 @@ export default function Configuracion({ token, user }) {
 
       {/* Tabs */}
       <div className="flex border-b border-outline-variant/60 mb-8">
-        <button 
-          onClick={() => setActiveTab('fisica')}
+        <button
+          onClick={() => setConfigTab('fisica')}
           className={`pb-3 px-6 text-xs font-bold transition-all border-b-2 cursor-pointer ${activeTab === 'fisica' ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-on-surface'}`}
         >
           Distribución Física y Camas
         </button>
         {(user?.role === 'admin' || user?.role === 'supervisor' || user?.role === 'gerente') && (
-          <button 
-            onClick={() => setActiveTab('usuarios')}
+          <button
+            onClick={() => setConfigTab('usuarios')}
             className={`pb-3 px-6 text-xs font-bold transition-all border-b-2 cursor-pointer ${activeTab === 'usuarios' ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-on-surface'}`}
           >
             Gestión de Personal y Cuentas
@@ -525,20 +533,20 @@ export default function Configuracion({ token, user }) {
         <>
           {/* Grid: Space/Beds configuration */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-            
+
             {/* Left Side: Create/Edit Room */}
             <div className="bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-xs h-fit">
               <h3 className="text-sm font-bold text-primary mb-4">
                 {isEditingSpace ? `Editar Salón: ${oldRoomNumber}` : 'Configurar Nuevo Salón / Espacio'}
               </h3>
-              
+
               <form onSubmit={handleSpaceSubmit} className="flex flex-col gap-4">
                 <div>
                   <label className="text-xs font-bold text-on-surface-variant block mb-1">Nombre del Espacio / Habitación</label>
-                  <input 
-                    type="text" 
-                    value={roomNumber} 
-                    onChange={(e) => setRoomNumber(e.target.value)} 
+                  <input
+                    type="text"
+                    value={roomNumber}
+                    onChange={(e) => setRoomNumber(e.target.value)}
                     placeholder="ej. Habitación 1 o Bloque A"
                     className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
                     required
@@ -547,10 +555,10 @@ export default function Configuracion({ token, user }) {
 
                 <div>
                   <label className="text-xs font-bold text-on-surface-variant block mb-1">Cantidad de Camas</label>
-                  <input 
-                    type="number" 
-                    value={bedCount} 
-                    onChange={(e) => setBedCount(e.target.value)} 
+                  <input
+                    type="number"
+                    value={bedCount}
+                    onChange={(e) => setBedCount(e.target.value)}
                     min="1"
                     max="100"
                     className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
@@ -560,16 +568,16 @@ export default function Configuracion({ token, user }) {
 
                 <div className="flex gap-2 mt-2">
                   {isEditingSpace && (
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={handleCancelEditSpace}
                       className="flex-1 py-2.5 bg-surface border border-outline-variant text-on-surface font-bold rounded-lg text-xs cursor-pointer hover:bg-surface-container"
                     >
                       Cancelar
                     </button>
                   )}
-                  <button 
-                    type="submit" 
+                  <button
+                    type="submit"
                     className="flex-grow py-2.5 bg-[#0b2347] text-white font-bold rounded-lg text-xs cursor-pointer flex items-center justify-center gap-2"
                   >
                     <span className="material-symbols-outlined text-sm">{isEditingSpace ? 'save' : 'add'}</span>
@@ -582,7 +590,7 @@ export default function Configuracion({ token, user }) {
             {/* Right Side: Rooms list */}
             <div className="lg:col-span-2 bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-xs">
               <h3 className="text-sm font-bold text-primary mb-4">Espacios y Camas Configurados</h3>
-              
+
               {loadingBeds ? (
                 <div className="text-center py-8 text-xs text-on-surface-variant">Cargando distribución...</div>
               ) : Object.keys(rooms).length > 0 ? (
@@ -605,14 +613,14 @@ export default function Configuracion({ token, user }) {
                           <td className="py-2.5 px-4 text-center text-success font-semibold">{rooms[rName].available}</td>
                           <td className="py-2.5 px-4 text-center text-on-surface-variant font-semibold">{rooms[rName].occupied}</td>
                           <td className="py-2.5 px-4 text-right flex justify-end gap-1.5">
-                            <button 
+                            <button
                               onClick={() => handleEditSpaceClick(rName, rooms[rName].total)}
                               className="text-primary hover:bg-primary/10 p-1.5 rounded-full cursor-pointer"
                               title="Editar Espacio"
                             >
                               <span className="material-symbols-outlined text-sm font-bold">edit</span>
                             </button>
-                            <button 
+                            <button
                               onClick={() => handleDeleteSpace(rName)}
                               className="text-error hover:bg-error-container/20 p-1.5 rounded-full cursor-pointer"
                               title="Eliminar Espacio"
@@ -636,20 +644,20 @@ export default function Configuracion({ token, user }) {
 
           {/* Grid: Storage warehouses (Depósitos) configuration */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
+
             {/* Left Side: Create/Edit Deposito */}
             <div className="bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-xs h-fit">
               <h3 className="text-sm font-bold text-primary mb-4">
                 {isEditingDeposito ? 'Editar Depósito' : 'Configurar Nuevo Depósito de Destino'}
               </h3>
-              
+
               <form onSubmit={handleDepositoSubmit} className="flex flex-col gap-4">
                 <div>
                   <label className="text-xs font-bold text-on-surface-variant block mb-1">Nombre del Depósito</label>
-                  <input 
-                    type="text" 
-                    value={depositoName} 
-                    onChange={(e) => setDepositoName(e.target.value)} 
+                  <input
+                    type="text"
+                    value={depositoName}
+                    onChange={(e) => setDepositoName(e.target.value)}
                     placeholder="ej. Depósito Principal o Depósito Oeste"
                     className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
                     required
@@ -658,9 +666,9 @@ export default function Configuracion({ token, user }) {
 
                 <div>
                   <label className="text-xs font-bold text-on-surface-variant block mb-1">Descripción corta</label>
-                  <textarea 
-                    value={depositoDesc} 
-                    onChange={(e) => setDepositoDesc(e.target.value)} 
+                  <textarea
+                    value={depositoDesc}
+                    onChange={(e) => setDepositoDesc(e.target.value)}
                     placeholder="Indique ubicación o tipo de insumos..."
                     className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary h-20 resize-none font-medium"
                   />
@@ -668,10 +676,10 @@ export default function Configuracion({ token, user }) {
 
                 <div>
                   <label className="text-xs font-bold text-on-surface-variant block mb-1">Porcentaje de Capacidad (%)</label>
-                  <input 
-                    type="number" 
-                    value={depositoCap} 
-                    onChange={(e) => setDepositoCap(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))} 
+                  <input
+                    type="number"
+                    value={depositoCap}
+                    onChange={(e) => setDepositoCap(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
                     min="0"
                     max="100"
                     className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
@@ -681,16 +689,16 @@ export default function Configuracion({ token, user }) {
 
                 <div className="flex gap-2 mt-2">
                   {isEditingDeposito && (
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={handleCancelEditDeposito}
                       className="flex-1 py-2.5 bg-surface border border-outline-variant text-on-surface font-bold rounded-lg text-xs cursor-pointer hover:bg-surface-container"
                     >
                       Cancelar
                     </button>
                   )}
-                  <button 
-                    type="submit" 
+                  <button
+                    type="submit"
                     className="flex-grow py-2.5 bg-primary text-on-primary font-bold rounded-lg text-xs cursor-pointer flex items-center justify-center gap-2"
                   >
                     <span className="material-symbols-outlined text-sm">{isEditingDeposito ? 'save' : 'warehouse'}</span>
@@ -703,7 +711,7 @@ export default function Configuracion({ token, user }) {
             {/* Right Side: Depósitos List */}
             <div className="lg:col-span-2 bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-xs">
               <h3 className="text-sm font-bold text-primary mb-4">Depósitos Configurados en la Sede</h3>
-              
+
               {loadingDepositos ? (
                 <div className="text-center py-8 text-xs text-on-surface-variant">Cargando depósitos...</div>
               ) : depositos.length > 0 ? (
@@ -728,8 +736,8 @@ export default function Configuracion({ token, user }) {
                           <td className="py-3 px-4 text-center">
                             <div className="flex items-center justify-center gap-2">
                               <div className="w-16 bg-surface-container rounded-full h-1.5">
-                                <div 
-                                  className={`h-1.5 rounded-full ${dep.capacity_percent > 80 ? 'bg-error' : dep.capacity_percent > 40 ? 'bg-primary' : 'bg-success'}`} 
+                                <div
+                                  className={`h-1.5 rounded-full ${dep.capacity_percent > 80 ? 'bg-error' : dep.capacity_percent > 40 ? 'bg-primary' : 'bg-success'}`}
                                   style={{ width: `${dep.capacity_percent}%` }}
                                 ></div>
                               </div>
@@ -737,14 +745,14 @@ export default function Configuracion({ token, user }) {
                             </div>
                           </td>
                           <td className="py-3 px-4 text-right flex justify-end gap-1.5">
-                            <button 
+                            <button
                               onClick={() => handleEditDepositoClick(dep)}
                               className="text-primary hover:bg-primary/10 p-1.5 rounded-full cursor-pointer"
                               title="Editar Depósito"
                             >
                               <span className="material-symbols-outlined text-sm font-bold">edit</span>
                             </button>
-                            <button 
+                            <button
                               onClick={() => handleDeleteDeposito(dep.id, dep.name)}
                               className="text-error hover:bg-error-container/20 p-1.5 rounded-full cursor-pointer"
                               title="Eliminar Depósito"
@@ -769,17 +777,17 @@ export default function Configuracion({ token, user }) {
       ) : (
         /* TAB DE GESTIÓN DE PERSONAL */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          
+
           {/* Formulario Registro de Personal */}
-          <div className="bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-xs h-fit">
+          <div ref={userFormRef} className="bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-xs h-fit">
             <h3 className="text-sm font-bold text-primary mb-4">
               {isEditingUser ? 'Editar Cuenta de Acceso' : 'Registrar Nuevo Personal'}
             </h3>
-            
+
             <form onSubmit={handleUserSubmit} className="flex flex-col gap-4">
               <div>
                 <label className="text-xs font-bold text-on-surface-variant block mb-1">Nombre Completo</label>
-                <input 
+                <input
                   type="text"
                   value={newUserName}
                   onChange={e => setNewUserName(e.target.value)}
@@ -791,7 +799,7 @@ export default function Configuracion({ token, user }) {
 
               <div>
                 <label className="text-xs font-bold text-on-surface-variant block mb-1">Correo Electrónico</label>
-                <input 
+                <input
                   type="email"
                   value={newUserEmail}
                   onChange={e => setNewUserEmail(e.target.value)}
@@ -805,7 +813,7 @@ export default function Configuracion({ token, user }) {
                 <label className="text-xs font-bold text-on-surface-variant block mb-1">
                   {isEditingUser ? 'Nueva Contraseña (dejar vacío para conservar)' : 'Contraseña Inicial'}
                 </label>
-                <input 
+                <input
                   type="password"
                   value={newUserPassword}
                   onChange={e => setNewUserPassword(e.target.value)}
@@ -850,16 +858,16 @@ export default function Configuracion({ token, user }) {
 
               <div className="flex gap-2 mt-2">
                 {isEditingUser && (
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     onClick={handleCancelEditUser}
                     className="flex-1 py-2.5 bg-surface border border-outline-variant text-on-surface font-bold rounded-lg text-xs cursor-pointer hover:bg-surface-container"
                   >
                     Cancelar
                   </button>
                 )}
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="flex-grow py-2.5 bg-primary text-on-primary font-bold rounded-lg text-xs cursor-pointer flex items-center justify-center gap-2"
                 >
                   <span className="material-symbols-outlined text-sm">{isEditingUser ? 'save' : 'person_add'}</span>
@@ -872,7 +880,7 @@ export default function Configuracion({ token, user }) {
           {/* Tabla de Usuarios Registrados */}
           <div className="lg:col-span-2 bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-xs">
             <h3 className="text-sm font-bold text-primary mb-4 font-black">Personal Registrado</h3>
-            
+
             {loadingUsers ? (
               <div className="text-center py-8 text-xs text-on-surface-variant">Cargando cuentas...</div>
             ) : usersList.length > 0 ? (
@@ -903,22 +911,29 @@ export default function Configuracion({ token, user }) {
                         <td className="py-3 px-4 text-on-surface-variant font-medium">
                           {u.refugio_name || (u.role === 'admin' || u.role === 'supervisor' ? 'Acceso Global' : 'Sin Sede')}
                         </td>
-                        <td className="py-3 px-4 text-right flex justify-end gap-1.5">
-                          <button 
-                            onClick={() => handleEditUserClick(u)}
-                            className="text-primary hover:bg-primary-container/20 p-1.5 rounded-full cursor-pointer"
-                            title="Editar Cuenta"
-                          >
-                            <span className="material-symbols-outlined text-sm">edit</span>
-                          </button>
-                          
-                          <button 
-                            onClick={() => handleDeleteUser(u.id, u.name)}
-                            className="text-error hover:bg-error-container/20 p-1.5 rounded-full cursor-pointer"
-                            title="Eliminar Cuenta"
-                          >
-                            <span className="material-symbols-outlined text-sm">delete</span>
-                          </button>
+                        <td className="py-3 px-4 text-right">
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleEditUserClick(u)}
+                              data-testid={`edit-user-${u.id}`}
+                              aria-label={`Editar cuenta de ${u.name}`}
+                              className="w-9 h-9 inline-flex items-center justify-center text-primary hover:bg-primary-container/20 rounded-full cursor-pointer border-0 bg-transparent"
+                              title="Editar Cuenta"
+                            >
+                              <span className="material-symbols-outlined text-base pointer-events-none">edit</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteUser(u.id, u.name)}
+                              aria-label={`Eliminar cuenta de ${u.name}`}
+                              className="w-9 h-9 inline-flex items-center justify-center text-error hover:bg-error-container/20 rounded-full cursor-pointer border-0 bg-transparent"
+                              title="Eliminar Cuenta"
+                            >
+                              <span className="material-symbols-outlined text-base pointer-events-none">delete</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

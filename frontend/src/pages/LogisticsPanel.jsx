@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams, useNavigate } from 'react-router-dom';
 
 const MEAL_WINDOWS = [
@@ -21,10 +22,6 @@ export default function LogisticsPanel({ token }) {
   const [inventory, setInventory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [currentMealWindow, setCurrentMealWindow] = useState(getCurrentMealWindow());
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchData();

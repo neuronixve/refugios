@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams } from 'react-router-dom';
 
 const ROLE_LABELS = {
@@ -42,10 +43,6 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
   const [printFilter, setPrintFilter] = useState('pending'); // 'pending', 'printed', 'all'
   const [roleFilter, setRoleFilter] = useState('all');
   const [sortBy, setSortBy] = useState('role'); // 'role', 'name'
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchUsers();

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { useParams } from 'react-router-dom';
 
 export default function Inventory({ token, tab }) {
@@ -46,10 +47,6 @@ export default function Inventory({ token, tab }) {
     { item_name: '', quantity: 1 }
   ]);
   const [submittingDelivery, setSubmittingDelivery] = useState(false);
-
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
 
   useEffect(() => {
     fetchInventory();
