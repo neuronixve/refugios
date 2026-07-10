@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { NavLink, useParams, useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 
 export default function Sidebar({ user, selectedRefugio, onLogout, mobileOpen = false, onMobileClose = () => {} }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { refugioId } = useParams();
 
   const [comedorExpanded, setComedorExpanded] = useState(false);
   const [medicoExpanded, setMedicoExpanded] = useState(false);
@@ -170,7 +169,7 @@ export default function Sidebar({ user, selectedRefugio, onLogout, mobileOpen = 
                     </NavLink>
                     <NavLink to={`/refugio/${selectedRefugio.id}/carnetizacion/personal`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
                       <span className="material-symbols-outlined text-xs">assignment_ind</span>
-                      <span>Personal de Apoyo</span>
+                      <span>Añadir Personal</span>
                     </NavLink>
                   </div>
                 )}

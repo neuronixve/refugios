@@ -18,6 +18,7 @@ export default function LogisticsAttendance({ token }) {
 
   // Data States
   const [residents, setResidents] = useState([]);
+  const [staff, setStaff] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -26,7 +27,7 @@ export default function LogisticsAttendance({ token }) {
   // Scanning State
   const [scanning, setScanning] = useState(true);
   const [currentMealWindow, setCurrentMealWindow] = useState(getCurrentMealWindow());
-  const [scannedResident, setScannedResident] = useState(null);
+  const [scannedPerson, setScannedPerson] = useState(null);
   
   // Autocomplete Manual Entry States
   const [searchQuery, setSearchQuery] = useState('');
@@ -82,7 +83,14 @@ export default function LogisticsAttendance({ token }) {
         setResidents(await resRes.json());
       }
 
-      // 2. Fetch today's meal attendance
+      const resStaff = await fetch(`${API_BASE}/refugios/${refugioId}/staff`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (resStaff.ok) {
+        setStaff(await resStaff.json());
+      }
+
+      // 2. Fetch today's meal attendance for residents and staff
       const resAtt = await fetch(`${API_BASE}/refugios/${refugioId}/meals/attendance`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -157,42 +165,63 @@ export default function LogisticsAttendance({ token }) {
     setMessage('');
 
     try {
-      // Parse official QR code format (Sede-[SedeID]-Residente-[ResidenteID])
+      // Parse official QR code format (Sede-[SedeID]-Residente/Personal-[ID])
       const parts = decodedText.split('-');
-      if (parts[0] !== 'Sede' || parts[2] !== 'Residente') {
+      if (parts[0] !== 'Sede' || !['Residente', 'Personal'].includes(parts[2])) {
         throw new Error('Código QR inválido. No es una credencial oficial de refugio.');
       }
 
       const qrSedeId = parts[1];
-      const resId = parseInt(parts[3]);
+      const credentialType = parts[2];
+      const personId = parseInt(parts[3]);
 
       if (qrSedeId !== refugioId) {
         throw new Error(`Esta credencial pertenece a otra sede (Sede ID: ${qrSedeId}).`);
       }
 
-      if (isNaN(resId)) {
-        throw new Error('Código QR no contiene un identificador de residente válido.');
+      if (isNaN(personId)) {
+        throw new Error('Código QR no contiene un identificador válido.');
       }
 
-      let resObj = residents.find(r => r.id.toString() === resId.toString());
+      if (credentialType === 'Personal') {
+        let staffObj = staff.find(s => s.id.toString() === personId.toString());
+        if (!staffObj) {
+          const resStaff = await fetch(`${API_BASE}/refugios/${refugioId}/staff`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (resStaff.ok) {
+            const staffData = await resStaff.json();
+            setStaff(staffData);
+            staffObj = staffData.find(s => s.id.toString() === personId.toString());
+          }
+        }
+
+        if (!staffObj) {
+          throw new Error('Personal no registrado en esta sede.');
+        }
+
+        setScannedPerson({ ...staffObj, person_type: 'staff' });
+        await registerAttendance(staffObj.document_id, staffObj.id, 'staff');
+        return;
+      }
+
+      let resObj = residents.find(r => r.id.toString() === personId.toString());
       if (!resObj) {
-        // Fallback: search resident directly from backend API
-        const resSingle = await fetch(`${API_BASE}/damnificados?search=${resId}`, {
+        const resSingle = await fetch(`${API_BASE}/damnificados?search=${personId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (resSingle.ok) {
           const searchData = await resSingle.json();
-          resObj = searchData.find(r => r.id.toString() === resId.toString());
+          resObj = searchData.find(r => r.id.toString() === personId.toString());
         }
       }
 
       if (!resObj) {
-        const listInfo = (residents || []).map(r => `${r.id}:${r.first_name}`).join(', ');
-        throw new Error(`Residente no registrado en esta sede. QR ID: ${resId}, QR Sede: ${qrSedeId}, Local Sede: ${refugioId}, Arreglo en memoria: [${listInfo.slice(0, 100)}]`);
+        throw new Error('Residente no registrado en esta sede.');
       }
 
-      setScannedResident(resObj);
-      await registerAttendance(resObj.document_id, resObj.id);
+      setScannedPerson({ ...resObj, person_type: 'resident' });
+      await registerAttendance(resObj.document_id, resObj.id, 'resident');
     } catch (err) {
       console.error(err);
       playAlertSound('error');
@@ -205,7 +234,7 @@ export default function LogisticsAttendance({ token }) {
     // Suppress console flood of scanning feedback
   };
 
-  const registerAttendance = async (docId, residentId = null) => {
+  const registerAttendance = async (docId, personId = null, personType = 'resident') => {
     if (!currentMealWindow) {
       playAlertSound('error');
       setError('Fuera del horario de servicio. Desayuno 06:00-11:00, Almuerzo 11:30-16:30, Cena 17:30-22:00.');
@@ -222,7 +251,9 @@ export default function LogisticsAttendance({ token }) {
         },
         body: JSON.stringify({
           document_id: docId,
-          resident_id: residentId,
+          resident_id: personType === 'resident' ? personId : null,
+          staff_id: personType === 'staff' ? personId : null,
+          person_type: personType,
           refugio_id: parseInt(refugioId),
           meal_type: currentMealWindow.mealType
         })
@@ -255,8 +286,8 @@ export default function LogisticsAttendance({ token }) {
     setError('');
     setMessage('');
 
-    setScannedResident(selectedManualResident);
-    await registerAttendance(selectedManualResident.document_id, selectedManualResident.id);
+    setScannedPerson({ ...selectedManualResident, person_type: 'resident' });
+    await registerAttendance(selectedManualResident.document_id, selectedManualResident.id, 'resident');
     setSelectedManualResident(null);
     setSearchQuery('');
   };
@@ -264,7 +295,7 @@ export default function LogisticsAttendance({ token }) {
   const handleResumeScan = () => {
     setError('');
     setMessage('');
-    setScannedResident(null);
+    setScannedPerson(null);
     if (currentMealWindow) {
       setScanning(true);
     }
@@ -296,6 +327,18 @@ export default function LogisticsAttendance({ token }) {
     }
   };
 
+  const getPersonName = (person) => {
+    if (!person) return '';
+    if (person.person_type === 'staff' || person.staff_id) return person.name || person.staff_name || person.first_name || 'Personal';
+    return `${person.first_name || ''} ${person.last_name || ''}`.trim();
+  };
+
+  const getPersonPhoto = (person) => {
+    if (!person) return null;
+    if (person.person_type === 'staff' || person.staff_id) return person.photo || person.staff_photo || null;
+    return getResidentPhoto(person);
+  };
+
   // Get Diet restriction highlights
   const getDietLabel = (resObj) => {
     if (!resObj) return null;
@@ -311,7 +354,7 @@ export default function LogisticsAttendance({ token }) {
   };
 
   // Counters
-  const totalActive = residents.filter(r => r.status === 'Activo').length;
+  const totalActive = residents.filter(r => r.status === 'Activo').length + staff.length;
   const mealType = currentMealWindow?.mealType || 'Sin turno';
   const servidosHoy = attendance.filter(a => a.meal_type === mealType).length;
   const pendientesHoy = Math.max(0, totalActive - servidosHoy);
@@ -447,6 +490,7 @@ export default function LogisticsAttendance({ token }) {
             
             <p className="text-[10px] text-on-surface-variant text-center font-medium italic">
               Coloque el código QR del carnet del residente frente a la cámara para registrar su servicio de comida.
+              También puede escanear credenciales del personal activo en la sede.
             </p>
           </div>
 
@@ -545,43 +589,47 @@ export default function LogisticsAttendance({ token }) {
           {/* Last Scanned Resident Profile Card with Diet warning */}
           <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs flex flex-col gap-5 relative overflow-hidden">
             <h3 className="text-xs font-black text-on-surface uppercase tracking-wider border-b border-outline-variant/30 pb-3">
-              Ficha del Residente Escaneado
+              Ficha de Credencial Escaneada
             </h3>
 
-            {scannedResident ? (
+            {scannedPerson ? (
               <div className="flex flex-col items-center text-center gap-4">
                 
                 {/* Photo */}
                 <div className="w-16 h-16 rounded-full border border-[#0b2347]/20 bg-surface-container overflow-hidden flex items-center justify-center shrink-0">
-                  {getResidentPhoto(scannedResident) ? (
+                  {getPersonPhoto(scannedPerson) ? (
                     <img 
-                      src={getResidentPhoto(scannedResident)} 
+                      src={getPersonPhoto(scannedPerson)} 
                       alt="Foto Perfil" 
                       className="w-full h-full object-cover" 
                     />
                   ) : (
-                    <span className="material-symbols-outlined text-4xl text-[#0b2347]">person</span>
+                    <span className="material-symbols-outlined text-4xl text-[#0b2347]">
+                      {scannedPerson.person_type === 'staff' ? 'badge' : 'person'}
+                    </span>
                   )}
                 </div>
 
                 <div>
                   <h4 className="text-md font-black text-on-surface uppercase leading-none">
-                    {scannedResident.first_name} {scannedResident.last_name}
+                    {getPersonName(scannedPerson)}
                   </h4>
                   <p className="text-[10px] text-on-surface-variant font-bold mt-1.5 font-mono">
-                    ID: {getResidentCode(scannedResident)} • Sector {scannedResident.room_number || 'Sin Sector'}
+                    {scannedPerson.person_type === 'staff'
+                      ? `C.I. ${scannedPerson.document_id || 'Sin C.I.'} • ${scannedPerson.staff_function || 'Personal'}`
+                      : `ID: ${getResidentCode(scannedPerson)} • Sector ${scannedPerson.room_number || 'Sin Sector'}`}
                   </p>
                 </div>
 
                 {/* Critical Diet Alert Box */}
-                {getDietLabel(scannedResident) ? (
+                {scannedPerson.person_type !== 'staff' && getDietLabel(scannedPerson) ? (
                   <div className="w-full p-4 bg-error/10 border border-error/20 rounded-2xl text-xs text-left flex items-start gap-3 animate-pulse">
                     <div className="w-8 h-8 rounded-full bg-error/15 text-error flex items-center justify-center shrink-0">
                       <span className="material-symbols-outlined text-sm">local_hospital</span>
                     </div>
                     <div>
                       <span className="font-black text-error uppercase text-[9px] tracking-wider block">ALERTA MÉDICA NUTRICIONAL</span>
-                      <span className="font-bold text-on-surface text-[11px] block mt-1">{getDietLabel(scannedResident)}</span>
+                      <span className="font-bold text-on-surface text-[11px] block mt-1">{getDietLabel(scannedPerson)}</span>
                       <span className="text-[10px] text-on-surface-variant block mt-0.5 leading-normal">
                         Evite ingredientes procesados, alérgenos o grasas no aptas para su diagnóstico.
                       </span>
@@ -589,7 +637,7 @@ export default function LogisticsAttendance({ token }) {
                   </div>
                 ) : (
                   <div className="w-full p-3.5 bg-success/15 border border-success/35 text-success rounded-2xl text-xs text-center font-bold">
-                    Sin restricciones alimentarias. Dieta libre.
+                    {scannedPerson.person_type === 'staff' ? 'Personal de la sede validado para comedor.' : 'Sin restricciones alimentarias. Dieta libre.'}
                   </div>
                 )}
 
@@ -630,6 +678,9 @@ export default function LogisticsAttendance({ token }) {
                     <div className="flex flex-col gap-0.5">
                       <span className="font-bold text-on-surface">
                         {att.first_name} {att.last_name}
+                        {att.person_type === 'staff' && (
+                          <span className="ml-2 px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[8px] font-black uppercase">Personal</span>
+                        )}
                       </span>
                       {diet && (
                         <span className="text-[8px] font-black text-error uppercase">

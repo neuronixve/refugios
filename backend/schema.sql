@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(20) DEFAULT 'volunteer', -- 'admin', 'coordinator', 'volunteer'
+    document_id VARCHAR(30),
+    photo TEXT,
+    staff_function VARCHAR(120),
     refugio_id INTEGER REFERENCES refugios(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT NOW()
 );
@@ -116,6 +119,8 @@ CREATE TABLE IF NOT EXISTS menus (
 CREATE TABLE IF NOT EXISTS meal_attendance (
     id SERIAL PRIMARY KEY,
     resident_id INTEGER REFERENCES damnificados(id) ON DELETE CASCADE,
+    staff_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    person_type VARCHAR(20) DEFAULT 'resident',
     refugio_id INTEGER REFERENCES refugios(id) ON DELETE CASCADE,
     meal_date DATE DEFAULT CURRENT_DATE,
     meal_type VARCHAR(20) NOT NULL, -- 'Desayuno', 'Almuerzo', 'Cena'
@@ -141,6 +146,8 @@ CREATE TABLE donations (
 CREATE TABLE IF NOT EXISTS access_logs (
     id SERIAL PRIMARY KEY,
     resident_id INTEGER REFERENCES damnificados(id) ON DELETE CASCADE,
+    staff_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    person_type VARCHAR(20) DEFAULT 'resident',
     refugio_id INTEGER REFERENCES refugios(id) ON DELETE CASCADE,
     type VARCHAR(10) NOT NULL, -- 'entrada', 'salida'
     logged_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

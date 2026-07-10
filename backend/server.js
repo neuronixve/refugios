@@ -14,7 +14,7 @@ app.use(cors({
   origin: ['https://venezuelarenacera.com', 'http://localhost:5173'], // Tu web en producción y local
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 const fs = require('fs');
 const path = require('path');
@@ -33,6 +33,16 @@ async function initDb() {
 
     // Dynamic alterations (safe to run on every startup)
     await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS refugio_id INTEGER REFERENCES refugios(id) ON DELETE SET NULL');
+    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS document_id VARCHAR(30)');
+    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS photo TEXT');
+    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_function VARCHAR(120)');
+    await db.query('ALTER TABLE meal_attendance ADD COLUMN IF NOT EXISTS staff_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
+    await db.query("ALTER TABLE meal_attendance ADD COLUMN IF NOT EXISTS person_type VARCHAR(20) DEFAULT 'resident'");
+    await db.query('ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS staff_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
+    await db.query("ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS person_type VARCHAR(20) DEFAULT 'resident'");
+    await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS unique_staff_meal_attendance_per_day
+      ON meal_attendance (staff_id, meal_date, meal_type)
+      WHERE staff_id IS NOT NULL`);
     await db.query('ALTER TABLE menus ADD COLUMN IF NOT EXISTS ingredients TEXT');
     await db.query('ALTER TABLE refugios ADD COLUMN IF NOT EXISTS estado VARCHAR(100)');
     await db.query('ALTER TABLE refugios ADD COLUMN IF NOT EXISTS image_url TEXT');
@@ -229,7 +239,7 @@ app.get('/api/users', authenticateToken, async (req, res) => {
     if (req.user.role === 'admin') {
       // Superusuario ve todos los usuarios
       queryText = `
-        SELECT u.id, u.name, u.email, u.role, u.refugio_id, u.card_printed, r.name as refugio_name 
+        SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, r.name as refugio_name 
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
         ORDER BY u.id DESC
@@ -237,16 +247,16 @@ app.get('/api/users', authenticateToken, async (req, res) => {
     } else if (req.user.role === 'supervisor') {
       // Supervisor ve solo los gerentes de cada sede
       queryText = `
-        SELECT u.id, u.name, u.email, u.role, u.refugio_id, u.card_printed, r.name as refugio_name 
+        SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, r.name as refugio_name 
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
         WHERE u.role = 'gerente'
         ORDER BY u.id DESC
       `;
-    } else if (req.user.role === 'gerente') {
-      // Gerente ve solo el personal asignado a su sede (excluyéndose a sí mismo)
+    } else if (req.user.role === 'gerente' || req.user.role === 'registro') {
+      // Gerente y registro ven el personal asignado a su sede (excluyéndose a sí mismos)
       queryText = `
-        SELECT u.id, u.name, u.email, u.role, u.refugio_id, u.card_printed, r.name as refugio_name 
+        SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function, u.refugio_id, u.card_printed, r.name as refugio_name 
         FROM users u 
         LEFT JOIN refugios r ON u.refugio_id = r.id 
         WHERE u.refugio_id = $1 AND u.id != $2
@@ -267,9 +277,21 @@ app.get('/api/users', authenticateToken, async (req, res) => {
 
 // Crear usuario según jerarquía
 app.post('/api/users', authenticateToken, async (req, res) => {
-  const { name, email, password, role, refugio_id } = req.body;
-  if (!name || !email || !password || !role) {
-    return res.status(400).json({ error: 'Todos los campos son obligatorios.' });
+  let { name, email, password, role, refugio_id, document_id, photo, staff_function } = req.body;
+  if (!name || !role) {
+    return res.status(400).json({ error: 'Nombre y rol son obligatorios.' });
+  }
+
+  const cleanDocumentId = (document_id || '').trim();
+  const cleanStaffFunction = (staff_function || '').trim();
+  if (!email && cleanDocumentId) {
+    email = `personal.${cleanDocumentId.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}@campamento.local`;
+  }
+  if (!email) {
+    email = `personal.${Date.now()}@campamento.local`;
+  }
+  if (!password) {
+    password = Math.random().toString(36).slice(2, 12);
   }
 
   // Validación de Jerarquía de Creación
@@ -277,10 +299,10 @@ app.post('/api/users', authenticateToken, async (req, res) => {
     if (role !== 'gerente') {
       return res.status(403).json({ error: 'Supervisor solo tiene autorización para crear usuarios Gerentes.' });
     }
-  } else if (req.user.role === 'gerente') {
+  } else if (req.user.role === 'gerente' || req.user.role === 'registro') {
     const allowedRoles = ['medico', 'seguridad', 'cocina', 'almacen', 'registro', 'apoyo'];
     if (!allowedRoles.includes(role)) {
-      return res.status(403).json({ error: 'Gerente solo puede crear personal operativo para su sede.' });
+      return res.status(403).json({ error: 'Solo puede crear personal operativo para su sede.' });
     }
   } else if (req.user.role !== 'admin') {
     return res.status(403).json({ error: 'No autorizado para crear usuarios.' });
@@ -298,13 +320,15 @@ app.post('/api/users', authenticateToken, async (req, res) => {
     
     // Asignación de refugio_id automática si el creador es Gerente
     let targetRefugioId = refugio_id;
-    if (req.user.role === 'gerente') {
+    if (req.user.role === 'gerente' || req.user.role === 'registro') {
       targetRefugioId = req.user.refugio_id;
     }
 
     const result = await db.query(
-      'INSERT INTO users (name, email, password_hash, role, refugio_id) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, role, refugio_id',
-      [name, email, passwordHash, role, targetRefugioId || null]
+      `INSERT INTO users (name, email, password_hash, role, refugio_id, document_id, photo, staff_function)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, name, email, role, refugio_id, document_id, photo, staff_function, card_printed`,
+      [name, email, passwordHash, role, targetRefugioId || null, cleanDocumentId || null, photo || null, cleanStaffFunction || null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -317,7 +341,7 @@ app.post('/api/users', authenticateToken, async (req, res) => {
 // Actualizar usuario según jerarquía
 app.put('/api/users/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { name, email, password, role, refugio_id } = req.body;
+  const { name, email, password, role, refugio_id, document_id, photo, staff_function } = req.body;
 
   if (!name || !email || !role) {
     return res.status(400).json({ error: 'Nombre, email y rol son requeridos.' });
@@ -328,10 +352,10 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
     if (role !== 'gerente') {
       return res.status(403).json({ error: 'Supervisor solo tiene autorización para gestionar usuarios Gerentes.' });
     }
-  } else if (req.user.role === 'gerente') {
+  } else if (req.user.role === 'gerente' || req.user.role === 'registro') {
     const allowedRoles = ['medico', 'seguridad', 'cocina', 'almacen', 'registro', 'apoyo'];
     if (!allowedRoles.includes(role)) {
-      return res.status(403).json({ error: 'Gerente solo puede gestionar personal operativo para su sede.' });
+      return res.status(403).json({ error: 'Solo puede gestionar personal operativo para su sede.' });
     }
   } else if (req.user.role !== 'admin') {
     return res.status(403).json({ error: 'No autorizado para modificar usuarios.' });
@@ -346,17 +370,23 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
 
     // Asignación de refugio_id automática si el creador es Gerente
     let targetRefugioId = refugio_id;
-    if (req.user.role === 'gerente') {
+    if (req.user.role === 'gerente' || req.user.role === 'registro') {
       targetRefugioId = req.user.refugio_id;
     }
 
-    let queryText = 'UPDATE users SET name = $1, email = $2, role = $3, refugio_id = $4 WHERE id = $5 RETURNING id, name, email, role, refugio_id';
-    let queryParams = [name, email, role, targetRefugioId || null, id];
+    let queryText = `UPDATE users
+      SET name = $1, email = $2, role = $3, refugio_id = $4, document_id = $5, photo = $6, staff_function = $7
+      WHERE id = $8
+      RETURNING id, name, email, role, refugio_id, document_id, photo, staff_function`;
+    let queryParams = [name, email, role, targetRefugioId || null, document_id || null, photo || null, staff_function || null, id];
 
     if (password && password.trim() !== '') {
       const passwordHash = await bcrypt.hash(password, 10);
-      queryText = 'UPDATE users SET name = $1, email = $2, role = $3, refugio_id = $4, password_hash = $5 WHERE id = $6 RETURNING id, name, email, role, refugio_id';
-      queryParams = [name, email, role, targetRefugioId || null, passwordHash, id];
+      queryText = `UPDATE users
+        SET name = $1, email = $2, role = $3, refugio_id = $4, document_id = $5, photo = $6, staff_function = $7, password_hash = $8
+        WHERE id = $9
+        RETURNING id, name, email, role, refugio_id, document_id, photo, staff_function`;
+      queryParams = [name, email, role, targetRefugioId || null, document_id || null, photo || null, staff_function || null, passwordHash, id];
     }
 
     const result = await db.query(queryText, queryParams);
@@ -478,6 +508,24 @@ app.get('/api/refugios/:refugio_id/staff-count', authenticateToken, async (req, 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al obtener conteo de personal.' });
+  }
+});
+
+app.get('/api/refugios/:refugio_id/staff', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  try {
+    const result = await db.query(
+      `SELECT id, name, email, role, document_id, photo, staff_function, refugio_id, card_printed
+       FROM users
+       WHERE refugio_id = $1
+       AND role NOT IN ('admin', 'supervisor')
+       ORDER BY name ASC`,
+      [parseInt(refugio_id)]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener personal de la sede.' });
   }
 });
 
@@ -1182,9 +1230,16 @@ app.get('/api/refugios/:refugio_id/meals/attendance', authenticateToken, async (
   const { refugio_id } = req.params;
   try {
     const result = await db.query(`
-      SELECT ma.*, d.first_name, d.last_name, d.document_id 
+      SELECT ma.*,
+        COALESCE(d.first_name, u.name) as first_name,
+        COALESCE(d.last_name, '') as last_name,
+        COALESCE(d.document_id, u.document_id) as document_id,
+        u.name as staff_name,
+        u.staff_function,
+        u.photo as staff_photo
       FROM meal_attendance ma
-      JOIN damnificados d ON ma.resident_id = d.id
+      LEFT JOIN damnificados d ON ma.resident_id = d.id
+      LEFT JOIN users u ON ma.staff_id = u.id
       WHERE ma.refugio_id = $1 AND ma.meal_date = CURRENT_DATE
       ORDER BY ma.attended_at DESC
     `, [refugio_id]);
@@ -1196,8 +1251,9 @@ app.get('/api/refugios/:refugio_id/meals/attendance', authenticateToken, async (
 });
 
 app.post('/api/meals/attendance', authenticateToken, async (req, res) => {
-  const { document_id, resident_id, refugio_id } = req.body;
-  if ((!document_id && !resident_id) || !refugio_id) {
+  const { document_id, resident_id, staff_id, person_type = 'resident', refugio_id } = req.body;
+  const isStaff = person_type === 'staff' || !!staff_id;
+  if ((!document_id && !resident_id && !staff_id) || !refugio_id) {
     return res.status(400).json({ error: 'Cédula/Identificador y Refugio son requeridos.' });
   }
 
@@ -1209,28 +1265,58 @@ app.post('/api/meals/attendance', authenticateToken, async (req, res) => {
   }
 
   try {
-    let resResident;
-    if (resident_id) {
-      resResident = await db.query('SELECT id, first_name, last_name FROM damnificados WHERE id = $1', [resident_id]);
-    } else {
-      resResident = await db.query('SELECT id, first_name, last_name FROM damnificados WHERE document_id = $1', [document_id]);
+    if (isStaff) {
+      let staffRes;
+      if (staff_id) {
+        staffRes = await db.query(
+          `SELECT id, name, document_id, staff_function, photo, refugio_id
+           FROM users
+           WHERE id = $1 AND refugio_id = $2`,
+          [staff_id, refugio_id]
+        );
+      } else {
+        staffRes = await db.query(
+          `SELECT id, name, document_id, staff_function, photo, refugio_id
+           FROM users
+           WHERE document_id = $1 AND refugio_id = $2`,
+          [document_id, refugio_id]
+        );
+      }
+
+      if (staffRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Personal no encontrado en esta sede.' });
+      }
+
+      const staff = staffRes.rows[0];
+      const result = await db.query(
+        `INSERT INTO meal_attendance (staff_id, person_type, refugio_id, meal_type)
+         VALUES ($1, 'staff', $2, $3) RETURNING *`,
+        [staff.id, refugio_id, currentMeal.mealType]
+      );
+      return res.status(201).json({ attendance: result.rows[0], staff });
     }
 
+    let resResident;
+    if (resident_id) {
+      resResident = await db.query('SELECT id, first_name, last_name FROM damnificados WHERE id = $1 AND refugio_id = $2', [resident_id, refugio_id]);
+    } else {
+      resResident = await db.query('SELECT id, first_name, last_name FROM damnificados WHERE document_id = $1 AND refugio_id = $2', [document_id, refugio_id]);
+    }
     if (resResident.rows.length === 0) {
-      return res.status(404).json({ error: 'Residente no encontrado.' });
+      return res.status(404).json({ error: 'Residente no encontrado en esta sede.' });
     }
     
     const resident = resResident.rows[0];
     const result = await db.query(
-      `INSERT INTO meal_attendance (resident_id, refugio_id, meal_type)
-       VALUES ($1, $2, $3) RETURNING *`,
+      `INSERT INTO meal_attendance (resident_id, person_type, refugio_id, meal_type)
+       VALUES ($1, 'resident', $2, $3) RETURNING *`,
       [resident.id, refugio_id, currentMeal.mealType]
     );
     res.status(201).json({ attendance: result.rows[0], resident });
   } catch (err) {
     console.error(err);
     if (err.code === '23505') {
-      return res.status(400).json({ error: 'El residente ya registró su asistencia para esta comida hoy.' });
+      return res.status(400).json({ error: 'Esta persona ya registró su asistencia para esta comida hoy.' });
     }
     res.status(500).json({ error: 'Error al registrar asistencia.' });
   }
@@ -1369,17 +1455,45 @@ app.get('/api/stats', authenticateToken, async (req, res) => {
 // Registrar entrada o salida
 app.post('/api/refugios/:refugioId/access-logs', authenticateToken, async (req, res) => {
   const { refugioId } = req.params;
-  const { resident_id, type } = req.body;
+  const { resident_id, staff_id, person_type = 'resident', type } = req.body;
+  const isStaff = person_type === 'staff' || !!staff_id;
 
-  if (!resident_id || !type) {
-    return res.status(400).json({ error: 'Falta resident_id o tipo de acceso.' });
+  if ((!resident_id && !staff_id) || !type) {
+    return res.status(400).json({ error: 'Falta identificador o tipo de acceso.' });
   }
 
   try {
+    if (isStaff) {
+      const staffCheck = await db.query(
+        `SELECT id, name, document_id, staff_function, photo, refugio_id
+         FROM users
+         WHERE id = $1 AND refugio_id = $2`,
+        [staff_id, refugioId]
+      );
+      if (staffCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Personal no encontrado en esta sede.' });
+      }
+
+      const staff = staffCheck.rows[0];
+      const insertRes = await db.query(
+        `INSERT INTO access_logs (staff_id, person_type, refugio_id, type)
+         VALUES ($1, 'staff', $2, $3) RETURNING *`,
+        [staff.id, refugioId, type]
+      );
+
+      return res.status(201).json({
+        log: insertRes.rows[0],
+        person_type: 'staff',
+        resident_name: staff.name,
+        person_name: staff.name,
+        staff
+      });
+    }
+
     // 1. Verificar si el residente existe y está activo
     const residentCheck = await db.query(
-      'SELECT id, first_name, last_name, document_id, status FROM damnificados WHERE id = $1',
-      [resident_id]
+      'SELECT id, first_name, last_name, document_id, status FROM damnificados WHERE id = $1 AND refugio_id = $2',
+      [resident_id, refugioId]
     );
     if (residentCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Residente no encontrado.' });
@@ -1391,7 +1505,8 @@ app.post('/api/refugios/:refugioId/access-logs', authenticateToken, async (req, 
 
     // 2. Insertar registro de acceso
     const insertRes = await db.query(
-      'INSERT INTO access_logs (resident_id, refugio_id, type) VALUES ($1, $2, $3) RETURNING *',
+      `INSERT INTO access_logs (resident_id, person_type, refugio_id, type)
+       VALUES ($1, 'resident', $2, $3) RETURNING *`,
       [resident_id, refugioId, type]
     );
 
@@ -1404,6 +1519,8 @@ app.post('/api/refugios/:refugioId/access-logs', authenticateToken, async (req, 
 
     res.status(201).json({
       log: insertRes.rows[0],
+      person_type: 'resident',
+      person_name: `${resident.first_name} ${resident.last_name}`,
       resident: {
         id: resident.id,
         first_name: resident.first_name,
@@ -1424,9 +1541,17 @@ app.get('/api/refugios/:refugioId/access-logs', authenticateToken, async (req, r
   const { refugioId } = req.params;
   try {
     const result = await db.query(`
-      SELECT al.*, d.first_name, d.last_name, d.document_id, b.room_number, b.bed_number 
+      SELECT al.*,
+        COALESCE(d.first_name, u.name) as first_name,
+        COALESCE(d.last_name, '') as last_name,
+        COALESCE(d.document_id, u.document_id) as document_id,
+        u.name as staff_name,
+        u.staff_function,
+        b.room_number,
+        b.bed_number 
       FROM access_logs al
-      JOIN damnificados d ON al.resident_id = d.id
+      LEFT JOIN damnificados d ON al.resident_id = d.id
+      LEFT JOIN users u ON al.staff_id = u.id
       LEFT JOIN beds b ON d.id = b.resident_id
       WHERE al.refugio_id = $1
       ORDER BY al.logged_at DESC

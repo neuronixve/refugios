@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 
 export default function Configuracion({ token, user }) {
@@ -25,7 +25,7 @@ export default function Configuracion({ token, user }) {
   const [selectedDepositoId, setSelectedDepositoId] = useState(null);
 
   // RBAC User Management States
-  const [activeTab, setActiveTab] = useState('fisica');
+  const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem('configuracionActiveTab') || 'fisica');
   const [usersList, setUsersList] = useState([]);
   const [refugiosList, setRefugiosList] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -37,10 +37,16 @@ export default function Configuracion({ token, user }) {
   const [newUserRefugioId, setNewUserRefugioId] = useState('');
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [editingUserId, setEditingUserId] = useState(null);
+  const userFormRef = useRef(null);
 
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
     : 'https://api.venezuelarenacera.com/api';
+
+  const setConfigTab = (tab) => {
+    sessionStorage.setItem('configuracionActiveTab', tab);
+    setActiveTab(tab);
+  };
 
   useEffect(() => {
     fetchBeds();
@@ -382,13 +388,18 @@ export default function Configuracion({ token, user }) {
   const handleEditUserClick = (u) => {
     setError('');
     setMessage('');
+    setConfigTab('usuarios');
     setIsEditingUser(true);
     setEditingUserId(u.id);
     setNewUserName(u.name);
     setNewUserEmail(u.email);
     setNewUserPassword('');
     setNewUserRole(u.role);
-    setNewUserRefugioId(u.refugio_id || '');
+    setNewUserRefugioId(u.refugio_id ? String(u.refugio_id) : '');
+
+    window.requestAnimationFrame(() => {
+      userFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   };
 
   const handleCancelEditUser = () => {
@@ -506,14 +517,14 @@ export default function Configuracion({ token, user }) {
       {/* Tabs */}
       <div className="flex border-b border-outline-variant/60 mb-8">
         <button 
-          onClick={() => setActiveTab('fisica')}
+          onClick={() => setConfigTab('fisica')}
           className={`pb-3 px-6 text-xs font-bold transition-all border-b-2 cursor-pointer ${activeTab === 'fisica' ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-on-surface'}`}
         >
           Distribución Física y Camas
         </button>
         {(user?.role === 'admin' || user?.role === 'supervisor' || user?.role === 'gerente') && (
           <button 
-            onClick={() => setActiveTab('usuarios')}
+            onClick={() => setConfigTab('usuarios')}
             className={`pb-3 px-6 text-xs font-bold transition-all border-b-2 cursor-pointer ${activeTab === 'usuarios' ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-on-surface'}`}
           >
             Gestión de Personal y Cuentas
@@ -771,7 +782,7 @@ export default function Configuracion({ token, user }) {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
           {/* Formulario Registro de Personal */}
-          <div className="bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-xs h-fit">
+          <div ref={userFormRef} className="bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-xs h-fit">
             <h3 className="text-sm font-bold text-primary mb-4">
               {isEditingUser ? 'Editar Cuenta de Acceso' : 'Registrar Nuevo Personal'}
             </h3>
@@ -903,22 +914,29 @@ export default function Configuracion({ token, user }) {
                         <td className="py-3 px-4 text-on-surface-variant font-medium">
                           {u.refugio_name || (u.role === 'admin' || u.role === 'supervisor' ? 'Acceso Global' : 'Sin Sede')}
                         </td>
-                        <td className="py-3 px-4 text-right flex justify-end gap-1.5">
-                          <button 
-                            onClick={() => handleEditUserClick(u)}
-                            className="text-primary hover:bg-primary-container/20 p-1.5 rounded-full cursor-pointer"
-                            title="Editar Cuenta"
-                          >
-                            <span className="material-symbols-outlined text-sm">edit</span>
-                          </button>
-                          
-                          <button 
-                            onClick={() => handleDeleteUser(u.id, u.name)}
-                            className="text-error hover:bg-error-container/20 p-1.5 rounded-full cursor-pointer"
-                            title="Eliminar Cuenta"
-                          >
-                            <span className="material-symbols-outlined text-sm">delete</span>
-                          </button>
+                        <td className="py-3 px-4 text-right">
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            <button 
+                              type="button"
+                              onClick={() => handleEditUserClick(u)}
+                              data-testid={`edit-user-${u.id}`}
+                              aria-label={`Editar cuenta de ${u.name}`}
+                              className="w-9 h-9 inline-flex items-center justify-center text-primary hover:bg-primary-container/20 rounded-full cursor-pointer border-0 bg-transparent"
+                              title="Editar Cuenta"
+                            >
+                              <span className="material-symbols-outlined text-base pointer-events-none">edit</span>
+                            </button>
+                            
+                            <button 
+                              type="button"
+                              onClick={() => handleDeleteUser(u.id, u.name)}
+                              aria-label={`Eliminar cuenta de ${u.name}`}
+                              className="w-9 h-9 inline-flex items-center justify-center text-error hover:bg-error-container/20 rounded-full cursor-pointer border-0 bg-transparent"
+                              title="Eliminar Cuenta"
+                            >
+                              <span className="material-symbols-outlined text-base pointer-events-none">delete</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

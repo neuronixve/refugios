@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 
 const ROLE_LABELS = {
@@ -13,21 +13,17 @@ const ROLE_LABELS = {
   admin: 'Administrador General'
 };
 
-const ROLE_OPTIONS = [
-  { value: 'supervisor', label: ROLE_LABELS.supervisor },
-  { value: 'gerente', label: ROLE_LABELS.gerente },
-  { value: 'medico', label: ROLE_LABELS.medico },
-  { value: 'seguridad', label: ROLE_LABELS.seguridad },
-  { value: 'cocina', label: ROLE_LABELS.cocina },
-  { value: 'almacen', label: ROLE_LABELS.almacen },
-  { value: 'registro', label: ROLE_LABELS.registro },
-  { value: 'apoyo', label: ROLE_LABELS.apoyo }
+const DEFAULT_STAFF_FUNCTIONS = [
+  'Personal Médico',
+  'Personal de Seguridad',
+  'Personal Cocina',
+  'Personal Almacén',
+  'Personal Registro',
+  'Apoyo Social',
+  'Coordinación',
+  'Logística',
+  'Voluntariado'
 ];
-
-const ROLE_ORDER = ROLE_OPTIONS.reduce((order, role, index) => {
-  order[role.value] = index;
-  return order;
-}, { admin: ROLE_OPTIONS.length });
 
 export default function CarnetizacionPersonal({ token, selectedRefugio }) {
   const { refugioId } = useParams();
@@ -42,16 +38,30 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
   const [printFilter, setPrintFilter] = useState('pending'); // 'pending', 'printed', 'all'
   const [roleFilter, setRoleFilter] = useState('all');
   const [sortBy, setSortBy] = useState('role'); // 'role', 'name'
+  const [formData, setFormData] = useState({
+    name: '',
+    document_id: '',
+    photo: '',
+    staff_function: 'Personal Registro'
+  });
+  const [newFunctionName, setNewFunctionName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [formMessage, setFormMessage] = useState('');
+  const [formError, setFormError] = useState('');
 
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
     : 'https://api.venezuelarenacera.com/api';
 
-  useEffect(() => {
-    fetchUsers();
-  }, [refugioId]);
+  const staffFunctionOptions = Array.from(new Set([
+    ...DEFAULT_STAFF_FUNCTIONS,
+    formData.staff_function,
+    ...users.map(u => u.staff_function).filter(Boolean)
+  ].filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
-  const fetchUsers = async () => {
+  const getDisplayFunction = (u) => u.staff_function || ROLE_LABELS[u.role] || u.role || 'Personal de Apoyo';
+
+  const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/users`, {
@@ -72,7 +82,11 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [API_BASE, refugioId, token]);
+
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
 
   const handleToggleSelect = (id) => {
     if (selectedIds.includes(id)) {
@@ -93,6 +107,92 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
     }
   };
 
+  const handlePhotoChange = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setFormData(prev => ({ ...prev, photo: reader.result }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCreateFunction = () => {
+    const cleanName = newFunctionName.trim();
+    if (!cleanName) return;
+    setFormData(prev => ({ ...prev, staff_function: cleanName }));
+    setNewFunctionName('');
+  };
+
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      document_id: '',
+      photo: '',
+      staff_function: 'Personal Registro'
+    });
+    setNewFunctionName('');
+  };
+
+  const handleCreateStaff = async (event) => {
+    event.preventDefault();
+    setFormError('');
+    setFormMessage('');
+
+    const cleanName = formData.name.trim();
+    const cleanDocument = formData.document_id.trim();
+    const cleanFunction = formData.staff_function.trim();
+
+    if (!cleanName || !cleanDocument || !cleanFunction) {
+      setFormError('Nombre, cédula y función son obligatorios.');
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const generatedEmail = `personal.${cleanDocument.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}@campamento.local`;
+      const res = await fetch(`${API_BASE}/users`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: cleanName,
+          document_id: cleanDocument,
+          photo: formData.photo,
+          staff_function: cleanFunction,
+          email: generatedEmail,
+          password: Math.random().toString(36).slice(2, 12),
+          role: 'apoyo',
+          refugio_id: parseInt(refugioId)
+        })
+      });
+
+      const responseText = await res.text();
+      let data = {};
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        data = {};
+      }
+      if (!res.ok) {
+        throw new Error(data.error || 'No se pudo registrar el personal. Revise el tamaño de la foto e intente nuevamente.');
+      }
+
+      resetForm();
+      setFormMessage('Personal añadido al campamento temporal.');
+      await fetchUsers();
+      setSelectedIds(prev => [...new Set([data.id, ...prev])]);
+      setPrintFilter('pending');
+    } catch (err) {
+      setFormError(err.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
   // Search, filter, and sort logic
   const filteredUsers = users
     .filter(u => {
@@ -101,18 +201,20 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
       if (printFilter === 'printed') return isPrinted;
       return true;
     })
-    .filter(u => roleFilter === 'all' || u.role === roleFilter)
+    .filter(u => roleFilter === 'all' || getDisplayFunction(u) === roleFilter)
     .filter(u => {
       const fullName = (u.name || '').toLowerCase();
       const email = (u.email || '').toLowerCase();
+      const documentId = (u.document_id || '').toLowerCase();
+      const staffFunction = getDisplayFunction(u).toLowerCase();
       const q = searchQuery.toLowerCase();
-      return !q || fullName.includes(q) || email.includes(q);
+      return !q || fullName.includes(q) || email.includes(q) || documentId.includes(q) || staffFunction.includes(q);
     })
     .sort((a, b) => {
       if (sortBy === 'role') {
-        const roleA = ROLE_ORDER[a.role] ?? 99;
-        const roleB = ROLE_ORDER[b.role] ?? 99;
-        if (roleA !== roleB) return roleA - roleB;
+        const roleA = getDisplayFunction(a);
+        const roleB = getDisplayFunction(b);
+        if (roleA !== roleB) return roleA.localeCompare(roleB);
         return (a.name || '').localeCompare(b.name || '');
       } else {
         const nameA = (a.name || '').toLowerCase();
@@ -150,7 +252,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
   const getGroupedUsers = () => {
     const groups = {};
     filteredUsers.forEach(u => {
-      const roleLabel = ROLE_LABELS[u.role] || u.role;
+      const roleLabel = getDisplayFunction(u);
       if (!groups[roleLabel]) groups[roleLabel] = [];
       groups[roleLabel].push(u);
     });
@@ -159,7 +261,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
 
   const getRoleCount = (role) => {
     return users.filter(u => {
-      if (role !== 'all' && u.role !== role) return false;
+      if (role !== 'all' && getDisplayFunction(u) !== role) return false;
       if (printFilter === 'pending') return !u.card_printed;
       if (printFilter === 'printed') return !!u.card_printed;
       return true;
@@ -186,14 +288,16 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
               {u.card_printed ? '🟢 Impreso' : '🔴 Pendiente'}
             </span>
           </div>
-          <span className="text-[9px] text-on-surface-variant block mt-0.5 truncate">{u.email} | Rol: {ROLE_LABELS[u.role] || u.role}</span>
+          <span className="text-[9px] text-on-surface-variant block mt-0.5 truncate">
+            C.I. {u.document_id || 'Sin cédula'} | Función: {getDisplayFunction(u)}
+          </span>
         </div>
       </div>
     );
   };
 
-  const renderCard = (user, index) => {
-    const qrDataUrl = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=Sede-${refugioId}-Personal-${user.id}`;
+  const renderCard = (user) => {
+    const qrDataUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=Sede-${refugioId}-Personal-${user.id}`;
     
     return (
       <div 
@@ -228,13 +332,17 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
           </span>
         </div>
 
-        {/* Logo and QR Row */}
-        <div style={{ height: '24mm' }} className="flex justify-between px-2 items-center">
-          <div style={{ width: '18mm', height: '18mm' }} className="border border-gray-150 rounded-md overflow-hidden bg-slate-50 flex items-center justify-center shrink-0">
-            <span className="material-symbols-outlined text-[#0b2347] text-4xl">support_agent</span>
+        {/* Photo and QR Row */}
+        <div style={{ height: '27mm' }} className="flex justify-center gap-4 px-2 items-center">
+          <div style={{ width: '23mm', height: '23mm' }} className="border border-gray-150 rounded-md overflow-hidden bg-slate-50 flex items-center justify-center shrink-0">
+            {user.photo ? (
+              <img src={user.photo} alt={`Foto de ${user.name}`} className="w-full h-full object-cover" />
+            ) : (
+              <span className="material-symbols-outlined text-[#0b2347] text-4xl">support_agent</span>
+            )}
           </div>
           
-          <div style={{ width: '18mm', height: '18mm' }} className="shrink-0 flex items-center justify-center border border-gray-100 p-0.5 rounded">
+          <div style={{ width: '23mm', height: '23mm' }} className="shrink-0 flex items-center justify-center border border-gray-100 p-0.5 rounded">
             <img src={qrDataUrl} alt="QR Code" className="w-full h-full object-contain" />
           </div>
         </div>
@@ -246,7 +354,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
               {user.name}
             </span>
             <span style={{ fontSize: '6.5pt' }} className="text-on-surface-variant font-medium block truncate mt-0.5">
-              {user.email}
+              C.I. {user.document_id || 'Sin cédula'}
             </span>
           </div>
 
@@ -254,7 +362,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
             <div>
               <span className="text-on-surface-variant font-bold block">FUNCIÓN</span>
               <span className="font-extrabold text-[#0b2347] uppercase block mt-0.5">
-                {ROLE_LABELS[user.role] || user.role}
+                {getDisplayFunction(user)}
               </span>
             </div>
             <div className="text-right">
@@ -333,8 +441,8 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
       {/* Screen Header */}
       <header className="mb-8 print:hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-extrabold text-primary">Carnetización del Personal</h2>
-          <p className="text-xs text-on-surface-variant font-medium">Genere e imprima credenciales oficiales de identificación para el personal de apoyo, coordinadores y operarios.</p>
+          <h2 className="text-2xl font-extrabold text-primary">Añadir Personal y Carnetización</h2>
+          <p className="text-xs text-on-surface-variant font-medium">Registre personal del campamento temporal y genere sus credenciales oficiales con foto, cédula, función y código QR.</p>
         </div>
         <div className="flex gap-3">
           {selectedUsers.length > 0 && (
@@ -364,6 +472,116 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
         
         {/* LEFT WORKSPACE: SIDEBAR CONTROLS & CHECKLIST (4 Cols) */}
         <div className="lg:col-span-4 flex flex-col gap-6 print:hidden">
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs">
+            <div className="flex items-start justify-between gap-3 mb-5">
+              <div>
+                <h3 className="text-sm font-black text-primary">Añadir Personal al Campamento Temporal</h3>
+                <p className="text-[10px] text-on-surface-variant mt-1">Estos datos se usan para emitir la credencial física del personal.</p>
+              </div>
+              <span className="material-symbols-outlined text-primary">assignment_ind</span>
+            </div>
+
+            <form onSubmit={handleCreateStaff} className="flex flex-col gap-4">
+              <div className="flex items-center gap-4">
+                <label className="w-24 h-24 shrink-0 rounded-xl border border-dashed border-outline-variant bg-surface-container-low flex items-center justify-center overflow-hidden cursor-pointer hover:border-primary transition-colors">
+                  {formData.photo ? (
+                    <img src={formData.photo} alt="Foto del personal" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="material-symbols-outlined text-primary text-3xl">photo_camera</span>
+                  )}
+                  <input type="file" accept="image/*" onChange={handlePhotoChange} className="hidden" />
+                </label>
+                <div className="min-w-0">
+                  <span className="text-xs font-black text-on-surface block">Foto del personal</span>
+                  <span className="text-[10px] text-on-surface-variant block mt-1">Toque el recuadro para cargar la imagen que saldrá en el carnet.</span>
+                  {formData.photo && (
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, photo: '' }))}
+                      className="mt-2 text-[10px] font-bold text-error hover:underline"
+                    >
+                      Quitar foto
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-on-surface-variant block mb-1">Nombre Completo</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Ej. Manuel Cruces"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-on-surface-variant block mb-1">Cédula</label>
+                <input
+                  type="text"
+                  value={formData.document_id}
+                  onChange={e => setFormData(prev => ({ ...prev, document_id: e.target.value }))}
+                  placeholder="Ej. V-12345678"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-on-surface-variant block mb-1">Función / Rol en el Campamento</label>
+                <select
+                  value={formData.staff_function}
+                  onChange={e => setFormData(prev => ({ ...prev, staff_function: e.target.value }))}
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+                  required
+                >
+                  {staffFunctionOptions.map(role => (
+                    <option key={role} value={role}>{role}</option>
+                  ))}
+                </select>
+                <div className="flex gap-2 mt-2">
+                  <input
+                    type="text"
+                    value={newFunctionName}
+                    onChange={e => setNewFunctionName(e.target.value)}
+                    placeholder="Crear función nueva"
+                    className="min-w-0 flex-1 bg-surface-container-low border border-outline-variant rounded-lg p-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCreateFunction}
+                    className="px-3 py-2 bg-surface border border-outline-variant rounded-lg text-primary font-black text-[10px] hover:bg-surface-container"
+                  >
+                    Añadir
+                  </button>
+                </div>
+              </div>
+
+              {formError && (
+                <div className="bg-error-container/20 border border-error/25 text-error p-3 rounded-lg text-xs font-semibold">
+                  {formError}
+                </div>
+              )}
+              {formMessage && (
+                <div className="bg-success/15 border border-success/35 text-success p-3 rounded-lg text-xs font-semibold">
+                  {formMessage}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={creating}
+                className="w-full py-3 bg-primary text-on-primary font-bold rounded-xl text-xs hover:opacity-95 flex items-center justify-center gap-2 cursor-pointer shadow-sm transition-all disabled:opacity-60"
+              >
+                <span className="material-symbols-outlined text-sm">person_add</span>
+                {creating ? 'Registrando...' : 'Añadir Personal'}
+              </button>
+            </form>
+          </div>
+
           <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs flex flex-col gap-4">
             
             {/* Filter Tabs */}
@@ -391,7 +609,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
             {/* Role Filter */}
             <div className="flex flex-col gap-1.5">
               <div className="flex justify-between items-center">
-                <span className="font-bold text-on-surface-variant text-xs">Rol del Personal:</span>
+                <span className="font-bold text-on-surface-variant text-xs">Función del Personal:</span>
                 <span className="text-[10px] text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full font-bold">
                   {getRoleCount(roleFilter)} registros
                 </span>
@@ -401,9 +619,9 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
                 onChange={(e) => setRoleFilter(e.target.value)}
                 className="w-full bg-surface-container border border-outline-variant rounded-xl p-2.5 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-primary font-bold"
               >
-                <option value="all">-- Todos los Roles --</option>
-                {ROLE_OPTIONS.map(role => (
-                  <option key={role.value} value={role.value}>{role.label}</option>
+                <option value="all">-- Todas las Funciones --</option>
+                {staffFunctionOptions.map(role => (
+                  <option key={role} value={role}>{role}</option>
                 ))}
               </select>
             </div>

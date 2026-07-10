@@ -2,14 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
-export default function ControlAcceso({ token, selectedRefugio }) {
+export default function ControlAcceso({ token }) {
   const { refugioId } = useParams();
   
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState('entrada'); // 'entrada' or 'salida'
-  const [lastScanned, setLastScanned] = useState(null);
-  
   // Feedback Messages
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -156,7 +154,30 @@ export default function ControlAcceso({ token, selectedRefugio }) {
     }
   };
 
-  const registerTransit = async (residentId) => {
+  const parseCredentialQr = (decodedText) => {
+    const normalized = decodedText.includes('-') ? decodedText.split('-') : decodedText.split('_');
+    if (normalized[0] !== 'Sede' || normalized.length < 4) {
+      throw new Error('Código QR inválido o corrupto.');
+    }
+
+    const qrSedeId = normalized[1];
+    const credentialType = normalized[2];
+    const personId = parseInt(normalized[3]);
+
+    if (qrSedeId !== refugioId) {
+      throw new Error(`Esta credencial pertenece a otra sede (Sede ID: ${qrSedeId}).`);
+    }
+    if (!['Residente', 'Personal'].includes(credentialType) || isNaN(personId)) {
+      throw new Error('Código QR inválido o corrupto.');
+    }
+
+    return {
+      personType: credentialType === 'Personal' ? 'staff' : 'resident',
+      personId
+    };
+  };
+
+  const registerTransit = async (personId, personType = 'resident') => {
     setErrorMsg('');
     setSuccessMsg('');
     try {
@@ -167,15 +188,16 @@ export default function ControlAcceso({ token, selectedRefugio }) {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          resident_id: parseInt(residentId),
+          resident_id: personType === 'resident' ? parseInt(personId) : undefined,
+          staff_id: personType === 'staff' ? parseInt(personId) : undefined,
+          person_type: personType,
           type: mode
         })
       });
 
       const data = await res.json();
       if (res.ok) {
-        setSuccessMsg(`Registro exitoso: ${data.resident_name} ha registrado su ${mode}.`);
-        setLastScanned(data);
+        setSuccessMsg(`Registro exitoso: ${(data.person_name || data.resident_name)} ha registrado su ${mode}.`);
         fetchLogs();
       } else {
         setModalErrorText(data.error || 'Error al registrar tránsito.');
@@ -216,15 +238,14 @@ export default function ControlAcceso({ token, selectedRefugio }) {
 
       lastScanRef.current = { id: decodedText, time: now, type: mode };
       
-      const parts = decodedText.split('_');
-      const residentId = parts[parts.length - 1];
-      if (residentId && !isNaN(residentId)) {
-        registerTransit(residentId);
-      } else {
-        setModalErrorText('Código QR inválido o corrupto.');
+      try {
+        const credential = parseCredentialQr(decodedText);
+        registerTransit(credential.personId, credential.personType);
+      } catch (err) {
+        setModalErrorText(err.message || 'Código QR inválido o corrupto.');
         setShowErrorModal(true);
       }
-    }, (error) => {
+    }, () => {
       // quiet scan error
     });
 
@@ -241,7 +262,7 @@ export default function ControlAcceso({ token, selectedRefugio }) {
   const handleManualSubmit = (e) => {
     e.preventDefault();
     if (!manualCode.trim()) return;
-    registerTransit(manualCode.trim());
+    registerTransit(manualCode.trim(), 'resident');
     setManualCode('');
   };
 
@@ -414,7 +435,7 @@ export default function ControlAcceso({ token, selectedRefugio }) {
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-outline-variant text-on-surface-variant font-bold bg-surface/30">
-                    <th className="py-2 px-3 rounded-l-lg">Nombre del Residente</th>
+                    <th className="py-2 px-3 rounded-l-lg">Nombre</th>
                     <th className="py-2 px-3">Identificación</th>
                     <th className="py-2 px-3 text-center">Tipo de Movimiento</th>
                     <th className="py-2 px-3 rounded-r-lg">Hora y Fecha</th>
@@ -431,7 +452,12 @@ export default function ControlAcceso({ token, selectedRefugio }) {
                       const timeStr = new Date(log.logged_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                       return (
                         <tr key={log.id} className="border-b border-outline-variant/30 hover:bg-surface-container-low transition-all">
-                          <td className="py-3 px-3 font-bold text-primary">{log.first_name} {log.last_name}</td>
+                          <td className="py-3 px-3 font-bold text-primary">
+                            {log.first_name} {log.last_name}
+                            {log.person_type === 'staff' && (
+                              <span className="ml-2 px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[8px] font-black uppercase">Personal</span>
+                            )}
+                          </td>
                           <td className="py-3 px-3 text-on-surface-variant">C.I. {log.document_id || 'N/T'}</td>
                           <td className="py-3 px-3 text-center">
                             <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 ${
