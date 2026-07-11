@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 
 const ROLE_LABELS = {
@@ -67,10 +67,12 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
   const [creating, setCreating] = useState(false);
   const [formMessage, setFormMessage] = useState('');
   const [formError, setFormError] = useState('');
+  const [photoByUserId, setPhotoByUserId] = useState({});
+  const loadingPhotoIds = useRef(new Set());
 
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
+    : '/api';
 
   const staffFunctionOptions = Array.from(new Set([
     ...DEFAULT_STAFF_FUNCTIONS,
@@ -84,7 +86,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
     setLoading(true);
     setFormError('');
     try {
-      const res = await fetchWithTimeout(`${API_BASE}/refugios/${refugioId}/staff?include_photo=true`, {
+      const res = await fetchWithTimeout(`${API_BASE}/refugios/${refugioId}/staff`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await readApiResponse(res);
@@ -112,6 +114,48 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
+
+  useEffect(() => {
+    const activeUserIds = new Set(users.map(user => user.id));
+    const idsToLoad = selectedIds.filter(id =>
+      activeUserIds.has(id) &&
+      photoByUserId[id] === undefined &&
+      !loadingPhotoIds.current.has(id)
+    );
+
+    if (idsToLoad.length === 0) return;
+
+    let cancelled = false;
+
+    idsToLoad.forEach(async (id) => {
+      loadingPhotoIds.current.add(id);
+      try {
+        const res = await fetchWithTimeout(`${API_BASE}/users/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }, 20000);
+        const data = await readApiResponse(res);
+        if (!res.ok) throw new Error(data.error || 'No se pudo cargar la foto del personal.');
+        if (!cancelled) {
+          setPhotoByUserId(prev => (
+            prev[id] !== undefined ? prev : { ...prev, [id]: data.photo || '' }
+          ));
+        }
+      } catch (err) {
+        console.error('Error cargando foto de personal:', err);
+        if (!cancelled) {
+          setPhotoByUserId(prev => (
+            prev[id] !== undefined ? prev : { ...prev, [id]: '' }
+          ));
+        }
+      } finally {
+        loadingPhotoIds.current.delete(id);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [API_BASE, photoByUserId, selectedIds, token, users]);
 
   const handleToggleSelect = (id) => {
     if (selectedIds.includes(id)) {
@@ -319,6 +363,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
 
   const renderCard = (user) => {
     const qrDataUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=Sede-${refugioId}-Personal-${user.id}`;
+    const userPhoto = photoByUserId[user.id] ?? user.photo;
     
     return (
       <div 
@@ -356,8 +401,8 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
         {/* Photo and QR Row */}
         <div style={{ height: '27mm' }} className="flex justify-center gap-4 px-2 items-center">
           <div style={{ width: '23mm', height: '23mm' }} className="border border-gray-150 rounded-md overflow-hidden bg-slate-50 flex items-center justify-center shrink-0">
-            {user.photo ? (
-              <img src={user.photo} alt={`Foto de ${user.name}`} className="w-full h-full object-cover" />
+            {userPhoto ? (
+              <img src={userPhoto} alt={`Foto de ${user.name}`} className="w-full h-full object-cover" />
             ) : (
               <span className="material-symbols-outlined text-[#0b2347] text-4xl">support_agent</span>
             )}

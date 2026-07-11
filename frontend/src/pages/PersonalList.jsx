@@ -43,10 +43,12 @@ export default function PersonalList({ token }) {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [editPhotoLoading, setEditPhotoLoading] = useState(false);
+  const [editPhotoLoaded, setEditPhotoLoaded] = useState(false);
 
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
+    : '/api';
 
   const fetchStaff = useCallback(async () => {
     setLoading(true);
@@ -95,7 +97,7 @@ export default function PersonalList({ token }) {
     });
   }, [staff, query]);
 
-  const openEdit = (user) => {
+  const openEdit = async (user) => {
     setEditingUser(user);
     setFormData({
       name: user.name || '',
@@ -106,19 +108,52 @@ export default function PersonalList({ token }) {
     setNewFunctionName('');
     setMessage('');
     setError('');
+    setEditPhotoLoaded(!!user.photo);
+    setEditPhotoLoading(!user.photo);
+
+    try {
+      const res = await fetchWithTimeout(`${API_BASE}/users/${user.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      }, 20000);
+      const data = await readApiResponse(res);
+      if (!res.ok) throw new Error(data.error || 'No se pudo cargar la foto del personal.');
+
+      setEditingUser(prev => (
+        prev?.id === user.id ? { ...prev, ...data } : prev
+      ));
+      setFormData(prev => ({
+        ...prev,
+        name: data.name || prev.name,
+        document_id: data.document_id || '',
+        staff_function: data.staff_function || prev.staff_function || 'Apoyo Social',
+        photo: data.photo || ''
+      }));
+      setEditPhotoLoaded(true);
+    } catch (err) {
+      setError(err.name === 'AbortError'
+        ? 'La API tardó demasiado cargando la foto del personal.'
+        : err.message);
+    } finally {
+      setEditPhotoLoading(false);
+    }
   };
 
   const closeEdit = () => {
     setEditingUser(null);
     setFormData({ name: '', document_id: '', staff_function: '', photo: '' });
     setNewFunctionName('');
+    setEditPhotoLoading(false);
+    setEditPhotoLoaded(false);
   };
 
   const handlePhotoChange = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => setFormData(prev => ({ ...prev, photo: reader.result }));
+    reader.onload = () => {
+      setFormData(prev => ({ ...prev, photo: reader.result }));
+      setEditPhotoLoaded(true);
+    };
     reader.readAsDataURL(file);
   };
 
@@ -140,22 +175,26 @@ export default function PersonalList({ token }) {
       const fallbackEmail = cleanDocument
         ? `personal.${cleanDocument.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}.${editingUser.id}@campamento.local`
         : editingUser.email;
+      const payload = {
+        name: formData.name.trim(),
+        email: editingUser.email || fallbackEmail,
+        password: '',
+        role: editingUser.role || 'apoyo',
+        refugio_id: parseInt(refugioId),
+        document_id: cleanDocument,
+        staff_function: formData.staff_function.trim()
+      };
+      if (editPhotoLoaded) {
+        payload.photo = formData.photo;
+      }
+
       const res = await fetchWithTimeout(`${API_BASE}/users/${editingUser.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          name: formData.name.trim(),
-          email: editingUser.email || fallbackEmail,
-          password: '',
-          role: editingUser.role || 'apoyo',
-          refugio_id: parseInt(refugioId),
-          document_id: cleanDocument,
-          staff_function: formData.staff_function.trim(),
-          photo: formData.photo
-        })
+        body: JSON.stringify(payload)
       }, 30000);
       const data = await readApiResponse(res);
       if (!res.ok) throw new Error(data.error || 'No se pudo actualizar el personal.');
@@ -310,7 +349,17 @@ export default function PersonalList({ token }) {
                 </label>
                 <div>
                   <span className="text-xs font-black text-on-surface block">Foto</span>
-                  <button type="button" onClick={() => setFormData(prev => ({ ...prev, photo: '' }))} className="mt-2 text-[10px] font-bold text-error hover:underline">
+                  {editPhotoLoading && (
+                    <span className="text-[10px] text-on-surface-variant block mt-1">Cargando foto...</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormData(prev => ({ ...prev, photo: '' }));
+                      setEditPhotoLoaded(true);
+                    }}
+                    className="mt-2 text-[10px] font-bold text-error hover:underline"
+                  >
                     Quitar foto
                   </button>
                 </div>

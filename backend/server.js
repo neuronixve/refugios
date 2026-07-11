@@ -286,6 +286,45 @@ app.get('/api/users', authenticateToken, async (req, res) => {
   }
 });
 
+// Obtener un usuario puntual con foto para edición o credencial individual.
+app.get('/api/users/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await db.query(
+      `SELECT u.id, u.name, u.email, u.role, u.document_id, u.photo, u.staff_function,
+              u.refugio_id, u.card_printed, u.is_active, r.name as refugio_name
+       FROM users u
+       LEFT JOIN refugios r ON u.refugio_id = r.id
+       WHERE u.id = $1 AND COALESCE(u.is_active, TRUE) = TRUE`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado.' });
+    }
+
+    const targetUser = result.rows[0];
+
+    if (req.user.role === 'supervisor' && targetUser.role !== 'gerente') {
+      return res.status(403).json({ error: 'Supervisor solo puede consultar usuarios Gerentes.' });
+    }
+
+    if (req.user.role === 'gerente' || req.user.role === 'registro') {
+      if (parseInt(targetUser.refugio_id) !== parseInt(req.user.refugio_id)) {
+        return res.status(403).json({ error: 'No puedes consultar personal de otra sede.' });
+      }
+    } else if (req.user.role !== 'admin' && parseInt(req.user.id) !== parseInt(id)) {
+      return res.status(403).json({ error: 'No autorizado para consultar este usuario.' });
+    }
+
+    res.json(targetUser);
+  } catch (err) {
+    console.error('Error al obtener usuario:', err);
+    res.status(500).json({ error: 'Error al obtener usuario.' });
+  }
+});
+
 // Crear usuario según jerarquía
 app.post('/api/users', authenticateToken, async (req, res) => {
   let { name, email, password, role, refugio_id, document_id, photo, staff_function } = req.body;
@@ -353,6 +392,7 @@ app.post('/api/users', authenticateToken, async (req, res) => {
 app.put('/api/users/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { name, email, password, role, refugio_id, document_id, photo, staff_function } = req.body;
+  const shouldUpdatePhoto = Object.prototype.hasOwnProperty.call(req.body, 'photo');
 
   if (!name || !email || !role) {
     return res.status(400).json({ error: 'Nombre, email y rol son requeridos.' });
@@ -386,18 +426,23 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
     }
 
     let queryText = `UPDATE users
-      SET name = $1, email = $2, role = $3, refugio_id = $4, document_id = $5, photo = $6, staff_function = $7
-      WHERE id = $8
+      SET name = $1, email = $2, role = $3, refugio_id = $4, document_id = $5,
+          photo = CASE WHEN $8::boolean THEN $6 ELSE photo END,
+          staff_function = $7
+      WHERE id = $9
       RETURNING id, name, email, role, refugio_id, document_id, photo, staff_function`;
-    let queryParams = [name, email, role, targetRefugioId || null, document_id || null, photo || null, staff_function || null, id];
+    let queryParams = [name, email, role, targetRefugioId || null, document_id || null, photo || null, staff_function || null, shouldUpdatePhoto, id];
 
     if (password && password.trim() !== '') {
       const passwordHash = await bcrypt.hash(password, 10);
       queryText = `UPDATE users
-        SET name = $1, email = $2, role = $3, refugio_id = $4, document_id = $5, photo = $6, staff_function = $7, password_hash = $8
-        WHERE id = $9
+        SET name = $1, email = $2, role = $3, refugio_id = $4, document_id = $5,
+            photo = CASE WHEN $9::boolean THEN $6 ELSE photo END,
+            staff_function = $7,
+            password_hash = $8
+        WHERE id = $10
         RETURNING id, name, email, role, refugio_id, document_id, photo, staff_function`;
-      queryParams = [name, email, role, targetRefugioId || null, document_id || null, photo || null, staff_function || null, passwordHash, id];
+      queryParams = [name, email, role, targetRefugioId || null, document_id || null, photo || null, staff_function || null, passwordHash, shouldUpdatePhoto, id];
     }
 
     const result = await db.query(queryText, queryParams);
