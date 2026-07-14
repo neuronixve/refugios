@@ -96,6 +96,13 @@ export default function Sidebar({ user, selectedRefugio, onLogout, mobileOpen = 
             )}
 
             {(user.role === 'admin' || user.role === 'gerente' || user.role === 'registro') && (
+              <NavLink to={`/refugio/${selectedRefugio.id}/familias`} className={({ isActive }) => isActive ? activeClass : inactiveClass}>
+                <span className="material-symbols-outlined text-sm">family_restroom</span>
+                <span className="text-label-md">Familias</span>
+              </NavLink>
+            )}
+
+            {(user.role === 'admin' || user.role === 'gerente' || user.role === 'registro') && (
               <NavLink to={`/refugio/${selectedRefugio.id}/camas`} className={({ isActive }) => isActive ? activeClass : inactiveClass}>
                 <span className="material-symbols-outlined text-sm">single_bed</span>
                 <span className="text-label-md">Mapa de Camas</span>

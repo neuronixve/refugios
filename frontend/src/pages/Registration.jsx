@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 
 const VENEZUELA_STATES = [
   'Amazonas', 'Anzoátegui', 'Apure', 'Aragua', 'Barinas', 'Bolívar', 
@@ -35,6 +35,7 @@ const compressImage = (file) => {
 export default function Registration({ token }) {
   const { refugioId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [step, setStep] = useState(1); // 1: Personal, 2: Family, 3: Salud & Assignment
   
   // Data lists
@@ -149,6 +150,14 @@ export default function Registration({ token }) {
   }, [refugioId]);
 
   useEffect(() => {
+    const requestedFamilyId = searchParams.get('family_group_id');
+    if (requestedFamilyId) {
+      setFamilyOption('existing');
+      setSelectedFamilyId(requestedFamilyId);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     if (beds.length > 0) {
       const uniqueSpaces = Array.from(new Set(beds.map(b => b.room_number)));
       if (uniqueSpaces.length > 0 && !activeSpace) {
@@ -174,7 +183,7 @@ export default function Registration({ token }) {
 
   const fetchFamilies = async () => {
     try {
-      const res = await fetch(`${API_BASE}/family-groups`, {
+      const res = await fetch(`${API_BASE}/family-groups?refugio_id=${refugioId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {

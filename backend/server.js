@@ -647,14 +647,24 @@ app.delete('/api/refugios/:id', authenticateToken, async (req, res) => {
 
 // --- RUTAS DE GRUPOS FAMILIARES ---
 app.get('/api/family-groups', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.query;
   try {
+    const params = [];
+    let scope = '';
+    if (refugio_id) {
+      params.push(parseInt(refugio_id));
+      scope = `WHERE EXISTS (SELECT 1 FROM damnificados scoped WHERE scoped.family_group_id = fg.id AND scoped.refugio_id = $1)`;
+    }
     const result = await db.query(`
-      SELECT fg.*, COUNT(d.id)::int as members_count 
+      SELECT fg.*,
+             COUNT(d.id) FILTER (WHERE d.status = 'Activo')::int as members_count,
+             COUNT(d.id)::int as total_members
       FROM family_groups fg
       LEFT JOIN damnificados d ON fg.id = d.family_group_id
+      ${scope}
       GROUP BY fg.id
       ORDER BY fg.family_name ASC
-    `);
+    `, params);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -674,6 +684,23 @@ app.post('/api/family-groups', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al crear grupo familiar.' });
+  }
+});
+
+app.put('/api/family-groups/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { family_name, block_assignment } = req.body;
+  if (!family_name || !family_name.trim()) return res.status(400).json({ error: 'El nombre de la familia es requerido.' });
+  try {
+    const result = await db.query(
+      'UPDATE family_groups SET family_name = $1, block_assignment = $2 WHERE id = $3 RETURNING *',
+      [family_name.trim(), block_assignment || null, id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Grupo familiar no encontrado.' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al actualizar el grupo familiar.' });
   }
 });
 
