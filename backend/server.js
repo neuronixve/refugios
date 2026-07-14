@@ -773,6 +773,20 @@ app.put('/api/damnificados/:id', authenticateToken, async (req, res) => {
   const { document_id, first_name, last_name, birth_date, gender, health_status, special_needs, refugio_id, family_group_id, status } = req.body;
 
   try {
+    if ((status || 'Activo') === 'Activo' && refugio_id) {
+      const capacityCheck = await db.query(
+        `SELECT r.capacity,
+                COUNT(d.id) FILTER (WHERE d.status = 'Activo' AND d.id <> $2)::int AS active_count
+         FROM refugios r
+         LEFT JOIN damnificados d ON d.refugio_id = r.id
+         WHERE r.id = $1
+         GROUP BY r.id`,
+        [refugio_id, id]
+      );
+      if (capacityCheck.rows.length > 0 && capacityCheck.rows[0].active_count >= capacityCheck.rows[0].capacity) {
+        return res.status(400).json({ error: 'No se puede activar al residente porque el campamento temporal alcanzó su capacidad máxima.' });
+      }
+    }
     const result = await db.query(
       `UPDATE damnificados SET 
         document_id = $1, first_name = $2, last_name = $3, birth_date = $4, 

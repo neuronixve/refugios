@@ -99,6 +99,7 @@ export default function Registration({ token }) {
   // --- STEP 2: FAMILY GROUP STATE ---
   const [familyOption, setFamilyOption] = useState('none');
   const [selectedFamilyId, setSelectedFamilyId] = useState('');
+  const [existingFamilyRelationship, setExistingFamilyRelationship] = useState('Hija/o');
   const [familyMembers, setFamilyMembers] = useState([]);
 
   // --- STEP 3: MEDICAL & DYNAMIC SPACE ASSIGNMENT STATE ---
@@ -300,6 +301,10 @@ export default function Registration({ token }) {
       setError('');
       setStep(2);
     } else if (step === 2) {
+      if (familyOption === 'existing' && !selectedFamilyId) {
+        setError('Seleccione el grupo familiar al que pertenece el residente.');
+        return;
+      }
       if (familyOption === 'new' && familyMembers.length === 0) {
         setError('Por favor, añada al menos un miembro familiar o seleccione residente individual.');
         return;
@@ -377,6 +382,8 @@ export default function Registration({ token }) {
 
       const headMedical = {
         photo,
+        es_cabeza_familia: familyOption !== 'existing',
+        parentesco: familyOption === 'existing' ? existingFamilyRelationship : undefined,
         preexisting: headPreexisting,
         treatments,
         diet,
@@ -1168,7 +1175,7 @@ export default function Registration({ token }) {
                 </div>
 
                 {familyOption === 'existing' && (
-                  <div className="border border-outline-variant p-4 rounded-xl bg-surface-container/20 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="border border-outline-variant p-4 rounded-xl bg-surface-container/20 animate-in fade-in slide-in-from-top-2 duration-200 flex flex-col gap-3">
                     <label className="text-xs font-bold text-on-surface-variant block mb-1">Seleccionar Núcleo Familiar Activo</label>
                     <select 
                       value={selectedFamilyId}
@@ -1180,6 +1187,18 @@ export default function Registration({ token }) {
                         <option key={f.id} value={f.id}>{f.family_name}</option>
                       ))}
                     </select>
+                    <div>
+                      <label className="text-xs font-bold text-on-surface-variant block mb-1">Parentesco con la cabeza de familia</label>
+                      <select value={existingFamilyRelationship} onChange={(e) => setExistingFamilyRelationship(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none">
+                        <option value="Hija/o">Hija/o</option>
+                        <option value="Esposa/o o pareja">Esposa/o o pareja</option>
+                        <option value="Madre/Padre">Madre/Padre</option>
+                        <option value="Hermana/o">Hermana/o</option>
+                        <option value="Nieta/o">Nieta/o</option>
+                        <option value="Otro familiar">Otro familiar</option>
+                      </select>
+                    </div>
+                    <p className="text-[10px] text-on-surface-variant">Esta persona se agregará como integrante del núcleo seleccionado; no reemplazará a su cabeza de familia.</p>
                   </div>
                 )}
 

@@ -39,6 +39,7 @@ export default function Residents({ token }) {
   const [beds, setBeds] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showRetired, setShowRetired] = useState(false);
   
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -186,12 +187,105 @@ export default function Residents({ token }) {
   };
 
   const filteredResidents = residents.filter(res => {
-    if (res.status !== 'Activo') return false;
+    if (showRetired ? res.status === 'Activo' : res.status !== 'Activo') return false;
     const fullName = `${res.first_name} ${res.last_name}`.toLowerCase();
     const doc = (res.document_id || '').toLowerCase();
     const query = searchQuery.toLowerCase();
     return fullName.includes(query) || doc.includes(query);
   });
+
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+  }[char]));
+
+  const handleExportPdf = () => {
+    const activeResidents = residents.filter(resident => resident.status === 'Activo');
+    const rows = activeResidents.map((resident, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtml(`${resident.first_name} ${resident.last_name}`)}</td>
+        <td>${escapeHtml(resident.document_id || 'N/T')}</td>
+        <td>${escapeHtml(resident.gender || 'N/T')}</td>
+        <td>${escapeHtml(resident.birth_date ? resident.birth_date.split('T')[0] : 'N/T')}</td>
+        <td>${escapeHtml(resident.bedInfo)}</td>
+        <td>${escapeHtml(resident.family_name || 'Sin grupo')}</td>
+        <td>${escapeHtml(resident.health_status || 'N/T')}</td>
+      </tr>`).join('');
+    const report = window.open('', '_blank');
+    if (!report) {
+      setError('El navegador bloqueó la ventana del reporte. Permita ventanas emergentes e intente nuevamente.');
+      return;
+    }
+    report.document.write(`<!doctype html><html><head><title>Listado de residentes</title><style>
+      @page { size: landscape; margin: 12mm; } body { font-family: Arial, sans-serif; color: #17202a; }
+      h1 { font-size: 20px; margin-bottom: 4px; } p { font-size: 11px; margin: 3px 0 14px; }
+      table { width: 100%; border-collapse: collapse; font-size: 9px; }
+      th, td { border: 1px solid #aeb6bf; padding: 6px; text-align: left; }
+      th { background: #eaf2f8; } .footer { margin-top: 10px; font-size: 9px; }
+    </style></head><body><h1>Listado de residentes activos</h1>
+      <p>Campamento temporal · Total: ${activeResidents.length} · Emitido: ${escapeHtml(new Date().toLocaleString('es-VE'))}</p>
+      <table><thead><tr><th>N°</th><th>Nombre completo</th><th>Cédula</th><th>Sexo</th><th>F. nacimiento</th><th>Cama / espacio</th><th>Grupo familiar</th><th>Salud</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="8">No hay residentes activos.</td></tr>'}</tbody></table>
+      <div class="footer">Documento generado por el Sistema de Control de Campamentos Temporales.</div>
+      <script>window.onload=()=>{window.print();}</script></body></html>`);
+    report.document.close();
+  };
+
+  const updateResident = async (resident, overrides = {}) => fetch(`${API_BASE}/damnificados/${resident.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({
+      first_name: resident.first_name, last_name: resident.last_name,
+      document_id: resident.document_id, birth_date: resident.birth_date,
+      gender: resident.gender, health_status: resident.health_status,
+      status: resident.status, special_needs: resident.special_needs,
+      refugio_id: parseInt(refugioId), family_group_id: resident.family_group_id,
+      ...overrides
+    })
+  });
+
+  const handleReactivateResident = async (resident) => {
+    if (!window.confirm(`¿Reactivar a ${resident.first_name} ${resident.last_name} en este campamento temporal?`)) return;
+    setError('');
+    const response = await updateResident(resident, { status: 'Activo' });
+    if (response.ok) {
+      setMessage('Residente reactivado. Ya puede editar su ficha y conservará su historial y cédula.');
+      setShowRetired(false);
+      fetchResidentsAndBeds();
+    } else {
+      const data = await response.json().catch(() => ({}));
+      setError(data.error || 'No fue posible reactivar al residente.');
+    }
+  };
+
+  const handlePromoteToHead = async (resident) => {
+    if (!window.confirm(`¿Corregir a ${resident.first_name} ${resident.last_name} como cabeza de familia?`)) return;
+    setError('');
+    try {
+      let familyGroupId = resident.family_group_id;
+      if (!familyGroupId) {
+        const familyResponse = await fetch(`${API_BASE}/family-groups`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ family_name: `Familia de ${resident.first_name} ${resident.last_name} (C.I. ${resident.document_id || 'S/C'})`, block_assignment: 'Por asignar' })
+        });
+        if (!familyResponse.ok) throw new Error('No se pudo crear el grupo familiar.');
+        familyGroupId = (await familyResponse.json()).id;
+      }
+      let metadata = {};
+      try { metadata = JSON.parse(resident.special_needs || '{}'); } catch { metadata = {}; }
+      const response = await updateResident(resident, {
+        status: 'Activo', family_group_id: familyGroupId,
+        special_needs: JSON.stringify({ ...metadata, es_cabeza_familia: true, parentesco: undefined })
+      });
+      if (!response.ok) throw new Error('No se pudo actualizar la ficha.');
+      setMessage('Corrección realizada: la residente quedó activa y como cabeza de familia. Su grupo ya aparecerá al registrar a la hija.');
+      setShowRetired(false);
+      fetchResidentsAndBeds();
+    } catch (err) {
+      setError(err.message || 'No fue posible corregir el grupo familiar.');
+    }
+  };
 
   const totalItems = filteredResidents.length;
   const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
@@ -491,9 +585,12 @@ export default function Residents({ token }) {
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       {/* Title */}
-      <header className="mb-8">
-        <h2 className="text-2xl font-extrabold text-primary">Residentes Registrados</h2>
-        <p className="text-xs text-on-surface-variant">Gestione los perfiles de los ciudadanos albergados en esta sede.</p>
+      <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div><h2 className="text-2xl font-extrabold text-primary">Residentes Registrados</h2>
+        <p className="text-xs text-on-surface-variant">Gestione los perfiles de los ciudadanos albergados en esta sede.</p></div>
+        <button onClick={handleExportPdf} className="px-4 py-2.5 bg-primary text-on-primary rounded-lg text-xs font-bold flex items-center gap-2 self-start">
+          <span className="material-symbols-outlined text-base">picture_as_pdf</span> Descargar listado PDF
+        </button>
       </header>
 
       {error && (
@@ -524,6 +621,9 @@ export default function Residents({ token }) {
         </div>
 
         <div className="flex items-center gap-3 text-xs">
+          <button onClick={() => { setShowRetired(!showRetired); setCurrentPage(1); }} className="px-3 py-2 border border-outline-variant rounded-lg font-bold text-primary">
+            {showRetired ? 'Ver residentes activos' : 'Recuperar egresados'}
+          </button>
           <span className="text-on-surface-variant font-semibold">Mostrar:</span>
           <select
             value={itemsPerPage}
@@ -559,7 +659,7 @@ export default function Residents({ token }) {
             </thead>
             <tbody className="divide-y divide-outline-variant text-xs">
               {currentResidents.map(res => {
-                const isRetirado = res.status === 'Retirado';
+                const isRetirado = res.status !== 'Activo';
                 const healthColor = res.health_status === 'Estable' ? 'bg-success/15 text-success' : (res.health_status === 'Bajo Observación' ? 'bg-warning/15 text-warning-variant text-orange-600' : 'bg-error/15 text-error');
 
                 return (
@@ -622,6 +722,15 @@ export default function Residents({ token }) {
                             Eliminar
                           </button>
                         </>
+                      )}
+                      {isRetirado && (
+                        <>
+                          <button onClick={() => handleReactivateResident(res)} className="px-3 py-1.5 bg-success/15 text-success font-bold rounded-lg text-[10px]">Reactivar</button>
+                          <button onClick={() => handlePromoteToHead(res)} className="px-3 py-1.5 bg-primary text-on-primary font-bold rounded-lg text-[10px]">Reactivar como cabeza</button>
+                        </>
+                      )}
+                      {!isRetirado && (
+                        <button onClick={() => handlePromoteToHead(res)} className="px-3 py-1.5 border border-primary text-primary font-bold rounded-lg text-[10px]">Hacer cabeza</button>
                       )}
                     </td>
                   </tr>

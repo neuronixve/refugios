@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS damnificados (
     special_needs TEXT,
     refugio_id INTEGER REFERENCES refugios(id) ON DELETE SET NULL,
     family_group_id INTEGER REFERENCES family_groups(id) ON DELETE SET NULL,
-    status VARCHAR(20) DEFAULT 'Activo', -- 'Activo', 'Trasladado', 'Egreso'
+    status VARCHAR(20) DEFAULT 'Activo', -- 'Activo', 'Trasladado', 'Retirado'
     created_at TIMESTAMP DEFAULT NOW()
 );
 
