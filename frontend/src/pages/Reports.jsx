@@ -395,8 +395,16 @@ export default function Reports({ token }) {
 
   // Bed stats
   const totalBeds = beds.length;
-  const occupiedBeds = beds.filter(b => b.status === 'Ocupada').length;
-  const availableBeds = totalBeds - occupiedBeds;
+  // resident_id is the authoritative assignment. The status fallback keeps
+  // compatibility with legacy rows that were marked occupied without a link.
+  const isBedOccupied = (bed) => {
+    const normalizedStatus = String(bed.status || '').trim().toLowerCase();
+    return bed.resident_id !== null && bed.resident_id !== undefined
+      ? true
+      : normalizedStatus === 'ocupada' || normalizedStatus === 'ocupado';
+  };
+  const occupiedBeds = beds.filter(isBedOccupied).length;
+  const availableBeds = beds.filter(bed => !isBedOccupied(bed) && String(bed.status || '').trim().toLowerCase() === 'disponible').length;
   const occupancyRate = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
 
   // Incident counts
