@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
+import { csvDateStamp, downloadCsv } from '../utils/exportCsv';
 
 const VENEZUELA_STATES = [
   'Amazonas', 'Anzoátegui', 'Apure', 'Aragua', 'Barinas', 'Bolívar', 
@@ -229,6 +230,34 @@ export default function Residents({ token }) {
       <div class="footer">Documento generado por el Sistema de Control de Campamentos Temporales.</div>
       <script>window.onload=()=>{window.print();}</script></body></html>`);
     report.document.close();
+  };
+
+  const handleExportCsv = () => {
+    const activeResidents = residents.filter(resident => resident.status === 'Activo');
+    const rows = activeResidents.map((resident, index) => {
+      let metadata = {};
+      try { metadata = JSON.parse(resident.special_needs || '{}'); } catch { metadata = {}; }
+      return [
+        index + 1,
+        `${resident.first_name} ${resident.last_name}`,
+        resident.document_id || 'N/T',
+        resident.gender || 'N/T',
+        resident.birth_date ? resident.birth_date.split('T')[0] : 'N/T',
+        resident.bedInfo || 'Sin cama',
+        resident.family_name || 'Sin grupo familiar',
+        metadata.es_cabeza_familia ? 'Sí' : 'No',
+        metadata.parentesco || '',
+        resident.health_status || 'N/T',
+        metadata.telefono_contacto || '',
+        metadata.contacto_emergencia || '',
+        resident.status
+      ];
+    });
+    downloadCsv(
+      `residentes-activos-${csvDateStamp()}.csv`,
+      ['N°', 'Nombre completo', 'Cédula', 'Sexo', 'Fecha de nacimiento', 'Cama / espacio', 'Grupo familiar', 'Cabeza de familia', 'Parentesco', 'Estado de salud', 'Teléfono', 'Contacto de emergencia', 'Estado'],
+      rows
+    );
   };
 
   const updateResident = async (resident, overrides = {}) => fetch(`${API_BASE}/damnificados/${resident.id}`, {
@@ -588,9 +617,14 @@ export default function Residents({ token }) {
       <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div><h2 className="text-2xl font-extrabold text-primary">Residentes Registrados</h2>
         <p className="text-xs text-on-surface-variant">Gestione los perfiles de los ciudadanos albergados en esta sede.</p></div>
-        <button onClick={handleExportPdf} className="px-4 py-2.5 bg-primary text-on-primary rounded-lg text-xs font-bold flex items-center gap-2 self-start">
-          <span className="material-symbols-outlined text-base">picture_as_pdf</span> Descargar listado PDF
-        </button>
+        <div className="flex flex-wrap gap-2 self-start">
+          <button onClick={handleExportCsv} className="px-4 py-2.5 border border-primary text-primary rounded-lg text-xs font-bold flex items-center gap-2">
+            <span className="material-symbols-outlined text-base">csv</span> Descargar CSV
+          </button>
+          <button onClick={handleExportPdf} className="px-4 py-2.5 bg-primary text-on-primary rounded-lg text-xs font-bold flex items-center gap-2">
+            <span className="material-symbols-outlined text-base">picture_as_pdf</span> Descargar listado PDF
+          </button>
+        </div>
       </header>
 
       {error && (

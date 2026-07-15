@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { csvDateStamp, downloadCsv } from '../utils/exportCsv';
 
 const DEFAULT_STAFF_FUNCTIONS = [
   'Personal Médico',
@@ -231,6 +232,24 @@ export default function PersonalList({ token }) {
     }
   };
 
+  const handleExportCsv = () => {
+    const rows = staff.map((user, index) => [
+      index + 1,
+      user.name || '',
+      user.document_id || 'Sin cédula',
+      user.staff_function || user.role || '',
+      user.role || '',
+      user.email || '',
+      `PERS-${String(user.id).padStart(3, '0')}`,
+      user.is_active === false ? 'Inactivo' : 'Activo'
+    ]);
+    downloadCsv(
+      `personal-activo-${csvDateStamp()}.csv`,
+      ['N°', 'Nombre completo', 'Cédula', 'Función', 'Rol del sistema', 'Correo', 'Código interno', 'Estado'],
+      rows
+    );
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <header className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -238,14 +257,19 @@ export default function PersonalList({ token }) {
           <h2 className="text-2xl font-extrabold text-primary">Listado de Personal</h2>
           <p className="text-xs text-on-surface-variant font-medium">Busque, edite o desactive personal activo de la sede sin perder trazabilidad histórica.</p>
         </div>
-        <div className="relative w-full md:w-96">
-          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">search</span>
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Buscar por nombre, cédula o función..."
-            className="w-full bg-surface-container-low border border-outline-variant rounded-xl py-3 pl-10 pr-4 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
-          />
+        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+          <button type="button" onClick={handleExportCsv} disabled={loading || staff.length === 0} className="px-4 py-3 border border-primary text-primary rounded-xl text-xs font-black flex items-center justify-center gap-2 disabled:opacity-50">
+            <span className="material-symbols-outlined text-base">csv</span> Descargar CSV
+          </button>
+          <div className="relative w-full md:w-96">
+            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">search</span>
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Buscar por nombre, cédula o función..."
+              className="w-full bg-surface-container-low border border-outline-variant rounded-xl py-3 pl-10 pr-4 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+            />
+          </div>
         </div>
       </header>
 
