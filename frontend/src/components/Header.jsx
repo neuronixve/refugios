@@ -39,7 +39,7 @@ export default function Header({ user, selectedRefugio, onMenuClick }) {
 
       {/* User Info, Actions & Ministry Logo */}
       <div className="flex items-center gap-4">
-        <img src="/logo-ministerio.png" alt="Logo Ministerio" className="hidden md:block h-12 object-contain mr-2" />
+        <img src="/logo-ministerio.png?v=20260715" alt="Ministerio del Poder Popular para Relaciones y Comercio Exterior" className="hidden md:block h-12 max-w-[240px] object-contain mr-2" />
         {user && (
           <div className="hidden sm:flex flex-col text-right">
             <span className="text-body-sm font-bold text-on-surface">{user.name}</span>
