@@ -85,28 +85,30 @@ export default function MedicalReport({ token }) {
         try {
           const meta = JSON.parse(r.special_needs);
           
-          if (meta.embarazo) {
+          if (meta.embarazo || meta.embarazada || meta.nutricion_especial === 'Embarazada') {
             embarazadas++;
           }
 
+          const preexisting = Array.isArray(meta.preexisting) ? meta.preexisting : [];
+          const normalizedPathologies = preexisting.map(value => String(value).trim().toLowerCase());
           const hasPathology = [
             meta.diabetes, meta.hypertension, meta.asthma, meta.epoc,
             meta.cardiovascular, meta.renal, meta.tuberculosis,
             meta.epilepsia, meta.psiquiatrico, meta.inmunocomprometido
-          ].some(p => p === true) || (meta.preexisting && meta.preexisting.length > 0);
+          ].some(p => p === true) || normalizedPathologies.length > 0;
 
           if (hasPathology) {
             cronicos++;
-            if (meta.treatments && meta.treatments.trim() !== '') {
-              tratamientos++;
-            }
+          }
+          if (typeof meta.treatments === 'string' && meta.treatments.trim() !== '') {
+            tratamientos++;
           }
 
           // Count specific
-          if (meta.hypertension) patList.hipertension++;
-          if (meta.diabetes) patList.diabetes++;
-          if (meta.asthma) patList.asma++;
-          if (meta.discapacidadMotriz) patList.discapacidad++;
+          if (meta.hypertension || normalizedPathologies.includes('hipertensión') || normalizedPathologies.includes('hipertension')) patList.hipertension++;
+          if (meta.diabetes || normalizedPathologies.includes('diabetes')) patList.diabetes++;
+          if (meta.asthma || normalizedPathologies.includes('asma')) patList.asma++;
+          if (meta.discapacidadMotriz || String(meta.discapacidad || '').trim().toLowerCase() === 'motora') patList.discapacidad++;
 
         } catch {
           // fallback
@@ -124,16 +126,22 @@ export default function MedicalReport({ token }) {
   const data = getDemographicsAndPathologies();
 
   // Percent calculation
-  const totalCenso = residents.length || 1;
-  const cronicosPercent = Math.round((data.cronicos / totalCenso) * 100);
+  const totalCenso = residents.length;
+  const cronicosPercent = totalCenso > 0 ? Math.round((data.cronicos / totalCenso) * 100) : 0;
 
   // Helper to get inventory stock status
   const getStockStatus = (itemName) => {
-    const item = inventory.find(i => i.item_name.toLowerCase().includes(itemName.toLowerCase()));
+    const terms = Array.isArray(itemName) ? itemName : [itemName];
+    const item = inventory.find(i => terms.some(term => String(i.item_name || '').toLowerCase().includes(term.toLowerCase())));
     if (!item) return 'CRÍTICO';
-    if (item.quantity <= item.min_threshold) return 'BAJO';
+    if (Number(item.quantity) <= 0) return 'AGOTADO';
+    if (Number(item.quantity) <= Number(item.min_threshold)) return 'BAJO';
     return 'OK';
   };
+
+  const criticalInventory = inventory.filter(item =>
+    Number(item.quantity) <= Number(item.min_threshold)
+  );
 
   const handleRequestWarehouse = async (itemName, qty) => {
     try {
@@ -205,58 +213,24 @@ export default function MedicalReport({ token }) {
               Alertas de Suministros Críticos
             </span>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              
-              {/* Alert 1 */}
-              <div className="bg-surface-container-low border border-outline-variant/40 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-error animate-ping"></span>
-                    <h4 className="text-xs font-black text-on-surface uppercase">Pañales y Fórmula (0-2 años)</h4>
-                    <span className="px-2 py-0.5 rounded font-black uppercase text-[7px] bg-error/15 text-error">Crítico</span>
+              {criticalInventory.length > 0 ? criticalInventory.slice(0, 4).map(item => (
+                <div key={item.id} className="bg-surface-container-low border border-outline-variant/40 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-error"></span>
+                      <h4 className="text-xs font-black text-on-surface uppercase">{item.item_name}</h4>
+                      <span className="px-2 py-0.5 rounded font-black uppercase text-[7px] bg-error/15 text-error">{Number(item.quantity) <= 0 ? 'Agotado' : 'Bajo'}</span>
+                    </div>
+                    <p className="text-[9px] text-on-surface-variant font-bold mt-1">Existencia real: {item.quantity} unidades. Mínimo configurado: {item.min_threshold}.</p>
                   </div>
-                  <p className="text-[9px] text-on-surface-variant font-bold mt-1">Suministro para menos de 24h. Afecta al 100% de lactantes ({data.lactantes} niños).</p>
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <button 
-                    onClick={() => navigate(`/refugio/${refugioId}/inventario`)}
-                    className="px-3 py-1.5 bg-[#0b2347] text-white font-bold rounded-lg text-[9px] cursor-pointer"
-                  >
-                    Registrar Ingreso
-                  </button>
-                  <button 
-                    onClick={() => handleRequestWarehouse('Fórmula y Pañales', 50)}
-                    className="px-3 py-1.5 bg-surface-container border border-outline-variant text-on-surface font-bold rounded-lg text-[9px] cursor-pointer"
-                  >
-                    Gestionar
-                  </button>
-                </div>
-              </div>
-
-              {/* Alert 2 */}
-              <div className="bg-surface-container-low border border-outline-variant/40 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-xs font-black text-on-surface uppercase">Insulina / Metformina</h4>
-                    <span className="px-2 py-0.5 rounded font-black uppercase text-[7px] bg-amber-600/15 text-amber-600">Bajo</span>
+                  <div className="flex gap-2 shrink-0">
+                    <button onClick={() => handleRequestWarehouse(item.item_name, Math.max(Number(item.min_threshold) - Number(item.quantity), 1))} className="px-3 py-1.5 bg-[#0b2347] text-white font-bold rounded-lg text-[9px] cursor-pointer">Solicitar Pedido</button>
+                    <button onClick={() => navigate(`/refugio/${refugioId}/medico/inventario`)} className="px-3 py-1.5 bg-surface-container border border-outline-variant text-on-surface font-bold rounded-lg text-[9px] cursor-pointer">Ver Inventario</button>
                   </div>
-                  <p className="text-[9px] text-on-surface-variant font-bold mt-1">Stock al 15%. Afecta a {data.patList.diabetes || 2} pacientes con Diabetes Mellitus.</p>
                 </div>
-                <div className="flex gap-2 shrink-0">
-                  <button 
-                    onClick={() => handleRequestWarehouse('Insulina', 30)}
-                    className="px-3 py-1.5 bg-[#0b2347] text-white font-bold rounded-lg text-[9px] cursor-pointer"
-                  >
-                    Solicitar Pedido
-                  </button>
-                  <button 
-                    onClick={() => navigate(`/refugio/${refugioId}/inventario`)}
-                    className="px-3 py-1.5 bg-surface-container border border-outline-variant text-on-surface font-bold rounded-lg text-[9px] cursor-pointer"
-                  >
-                    Ver Inventario
-                  </button>
-                </div>
-              </div>
-
+              )) : (
+                <div className="md:col-span-2 bg-success/10 border border-success/25 rounded-2xl p-4 text-xs font-bold text-success">No hay suministros por debajo del mínimo configurado.</div>
+              )}
             </div>
           </div>
 
@@ -267,8 +241,8 @@ export default function MedicalReport({ token }) {
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 flex items-center justify-between shadow-2xs">
               <div>
                 <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider block">Mujeres Embarazadas</span>
-                <span className="text-xl font-black text-[#0b2347] block font-mono mt-1">{data.embarazadas || 14}</span>
-                <span className="text-[8px] text-error font-black uppercase block mt-1">! 3 en último trimestre</span>
+                <span className="text-xl font-black text-[#0b2347] block font-mono mt-1">{data.embarazadas}</span>
+                <span className="text-[8px] text-on-surface-variant font-black uppercase block mt-1">Según fichas activas</span>
               </div>
               <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
                 <span className="material-symbols-outlined text-md">pregnant_woman</span>
@@ -279,8 +253,8 @@ export default function MedicalReport({ token }) {
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 flex items-center justify-between shadow-2xs">
               <div>
                 <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider block">Enfermedades Crónicas</span>
-                <span className="text-xl font-black text-[#0b2347] block font-mono mt-1">{data.cronicos || 86}</span>
-                <span className="text-[8px] text-on-surface-variant font-bold block mt-1">≈ {cronicosPercent || 22}% de la población total</span>
+                <span className="text-xl font-black text-[#0b2347] block font-mono mt-1">{data.cronicos}</span>
+                <span className="text-[8px] text-on-surface-variant font-bold block mt-1">≈ {cronicosPercent}% de la población total</span>
               </div>
               <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
                 <span className="material-symbols-outlined text-md">patient_list</span>
@@ -291,8 +265,8 @@ export default function MedicalReport({ token }) {
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 flex items-center justify-between shadow-2xs">
               <div>
                 <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider block">Tratamientos Activos</span>
-                <span className="text-xl font-black text-[#0b2347] block font-mono mt-1">{data.tratamientos || 52}</span>
-                <span className="text-[8px] text-success font-black uppercase block mt-1">✓ 95% adherencia reportada</span>
+                <span className="text-xl font-black text-[#0b2347] block font-mono mt-1">{data.tratamientos}</span>
+                <span className="text-[8px] text-success font-black uppercase block mt-1">Con indicaciones registradas</span>
               </div>
               <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
                 <span className="material-symbols-outlined text-md">receipt_long</span>
@@ -319,10 +293,10 @@ export default function MedicalReport({ token }) {
                       0-2 años (Lactantes)
                       <span className="px-1.5 py-0.5 rounded font-black uppercase text-[7px] bg-primary/10 text-primary">Pañales/Fórmula</span>
                     </span>
-                    <span className="text-on-surface-variant font-mono">{data.lactantes || 12} niños</span>
+                    <span className="text-on-surface-variant font-mono">{data.lactantes} niños</span>
                   </div>
                   <div className="w-full bg-surface-container rounded-full h-2">
-                    <div className="bg-primary h-2 rounded-full" style={{ width: `${Math.min(100, Math.round((data.lactantes / totalCenso) * 100)) || 15}%` }}></div>
+                    <div className="bg-primary h-2 rounded-full" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.lactantes / totalCenso) * 100)) : 0}%` }}></div>
                   </div>
                 </div>
 
@@ -330,10 +304,10 @@ export default function MedicalReport({ token }) {
                 <div className="flex flex-col gap-1.5">
                   <div className="flex justify-between items-center text-xs font-bold">
                     <span className="text-on-surface">3-5 años (Prescolar)</span>
-                    <span className="text-on-surface-variant font-mono">{data.prescolar || 18} niños</span>
+                    <span className="text-on-surface-variant font-mono">{data.prescolar} niños</span>
                   </div>
                   <div className="w-full bg-surface-container rounded-full h-2">
-                    <div className="bg-primary h-2 rounded-full" style={{ width: `${Math.min(100, Math.round((data.prescolar / totalCenso) * 100)) || 22}%` }}></div>
+                    <div className="bg-primary h-2 rounded-full" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.prescolar / totalCenso) * 100)) : 0}%` }}></div>
                   </div>
                 </div>
 
@@ -341,10 +315,10 @@ export default function MedicalReport({ token }) {
                 <div className="flex flex-col gap-1.5">
                   <div className="flex justify-between items-center text-xs font-bold">
                     <span className="text-on-surface">6-12 años (Escolares)</span>
-                    <span className="text-on-surface-variant font-mono">{data.escolar || 28} niños</span>
+                    <span className="text-on-surface-variant font-mono">{data.escolar} niños</span>
                   </div>
                   <div className="w-full bg-surface-container rounded-full h-2">
-                    <div className="bg-primary h-2 rounded-full" style={{ width: `${Math.min(100, Math.round((data.escolar / totalCenso) * 100)) || 35}%` }}></div>
+                    <div className="bg-primary h-2 rounded-full" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.escolar / totalCenso) * 100)) : 0}%` }}></div>
                   </div>
                 </div>
 
@@ -353,7 +327,7 @@ export default function MedicalReport({ token }) {
               {/* Info box */}
               <div className="mt-4 p-4 bg-surface-container-low border border-outline-variant/40 rounded-2xl text-[10px] text-on-surface-variant leading-relaxed font-medium">
                 <span className="font-black text-[#0b2347] uppercase block mb-1">Nota Logística</span>
-                Se estima una demanda semanal de 420 pañales y 15 latas de fórmula base para el segmento 0-2 años según censo actual.
+                Censo actual: {data.lactantes} residentes de 0 a 2 años. Estimación operativa semanal: {data.lactantes * 42} pañales (6 diarios por residente). La fórmula debe calcularse individualmente según indicación médica.
               </div>
             </div>
 
@@ -377,7 +351,7 @@ export default function MedicalReport({ token }) {
                   <tbody>
                     <tr className="border-b border-outline-variant/30">
                       <td className="py-2.5 font-bold text-on-surface">Hipertensión Arterial</td>
-                      <td className="py-2.5 text-center font-bold font-mono text-[#0b2347]">{data.patList.hipertension || 34}</td>
+                      <td className="py-2.5 text-center font-bold font-mono text-[#0b2347]">{data.patList.hipertension}</td>
                       <td className="py-2.5 text-on-surface-variant font-medium">Enalapril / Losartán</td>
                       <td className="py-2.5 text-right">
                         <span className={`px-2 py-0.5 rounded font-black text-[8px] uppercase ${
@@ -387,15 +361,15 @@ export default function MedicalReport({ token }) {
                     </tr>
                     <tr className="border-b border-outline-variant/30">
                       <td className="py-2.5 font-bold text-on-surface">Diabetes Mellitus</td>
-                      <td className="py-2.5 text-center font-bold font-mono text-[#0b2347]">{data.patList.diabetes || 22}</td>
+                      <td className="py-2.5 text-center font-bold font-mono text-[#0b2347]">{data.patList.diabetes}</td>
                       <td className="py-2.5 text-on-surface-variant font-medium">Insulina / Metformina</td>
                       <td className="py-2.5 text-right">
-                        <span className="px-2 py-0.5 rounded font-black text-[8px] bg-error/15 text-error uppercase">BAJO</span>
+                        <span className={`px-2 py-0.5 rounded font-black text-[8px] uppercase ${getStockStatus(['Insulina', 'Metformina']) === 'OK' ? 'bg-success/15 text-success' : 'bg-error/15 text-error'}`}>{getStockStatus(['Insulina', 'Metformina'])}</span>
                       </td>
                     </tr>
                     <tr className="border-b border-outline-variant/30">
                       <td className="py-2.5 font-bold text-on-surface">Asma Bronquial</td>
-                      <td className="py-2.5 text-center font-bold font-mono text-[#0b2347]">{data.patList.asma || 18}</td>
+                      <td className="py-2.5 text-center font-bold font-mono text-[#0b2347]">{data.patList.asma}</td>
                       <td className="py-2.5 text-on-surface-variant font-medium">Salbutamol Inhalador</td>
                       <td className="py-2.5 text-right">
                         <span className={`px-2 py-0.5 rounded font-black text-[8px] uppercase ${
@@ -405,10 +379,10 @@ export default function MedicalReport({ token }) {
                     </tr>
                     <tr className="border-b border-outline-variant/30">
                       <td className="py-2.5 font-bold text-on-surface">Discapacidad Motriz</td>
-                      <td className="py-2.5 text-center font-bold font-mono text-[#0b2347]">{data.patList.discapacidad || 7}</td>
+                      <td className="py-2.5 text-center font-bold font-mono text-[#0b2347]">{data.patList.discapacidad}</td>
                       <td className="py-2.5 text-on-surface-variant font-medium">Insumos Movilidad</td>
                       <td className="py-2.5 text-right">
-                        <span className="px-2 py-0.5 rounded font-black text-[8px] bg-error/15 text-error uppercase">CRÍTICO</span>
+                        <span className={`px-2 py-0.5 rounded font-black text-[8px] uppercase ${getStockStatus(['Silla', 'Muleta', 'Movilidad']) === 'OK' ? 'bg-success/15 text-success' : 'bg-error/15 text-error'}`}>{getStockStatus(['Silla', 'Muleta', 'Movilidad'])}</span>
                       </td>
                     </tr>
                   </tbody>
