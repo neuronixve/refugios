@@ -85,6 +85,7 @@ export default function Dashboard({ token, selectedRefugio }) {
       let countRequiresDiapers = 0, countLostDocs = 0;
       let countHousingDestruida = 0, countHousingInhabitable = 0, countHousingLeve = 0;
       let countTenurePropietario = 0, countTenureInquilino = 0, countTenureFamiliares = 0;
+      const households = new Map();
       let countEmployed = 0, countUnemployed = 0;
       let countWithPets = 0;
       let petsList = [];
@@ -149,17 +150,20 @@ export default function Dashboard({ token, selectedRefugio }) {
         if (meta.requiere_pañales_formula === 'Sí') countRequiresDiapers++;
         if (meta.documento_perdido === true) countLostDocs++;
 
-        // Housing Condition
-        const cond = meta.estado_vivienda || 'Daño leve / En evaluación';
-        if (cond === 'Colapso total / Destruida') countHousingDestruida++;
-        else if (cond === 'Daño estructural grave (Inhabitable)') countHousingInhabitable++;
-        else countHousingLeve++;
-
-        // Housing Tenure
-        const tenure = meta.tenencia_vivienda || 'Propietario';
-        if (tenure === 'Propietario') countTenurePropietario++;
-        else if (tenure === 'Inquilino') countTenureInquilino++;
-        else if (tenure === 'Vivo en casa de familiares') countTenureFamiliares++;
+        // One family group represents one home of origin. Prefer the head of
+        // family's answers because dependent members do not repeat this data.
+        const householdKey = r.family_group_id ? `family-${r.family_group_id}` : `resident-${r.id}`;
+        const isFamilyHead = meta.es_cabeza_familia === true || !meta.parentesco;
+        const hasHousingData = Boolean(meta.estado_vivienda || meta.tenencia_vivienda);
+        const priority = isFamilyHead ? 2 : (hasHousingData ? 1 : 0);
+        const currentHousehold = households.get(householdKey);
+        if (!currentHousehold || priority > currentHousehold.priority) {
+          households.set(householdKey, {
+            condition: meta.estado_vivienda || 'Daño leve / En evaluación',
+            tenure: meta.tenencia_vivienda || 'Propietario',
+            priority
+          });
+        }
 
         // Employment
         const job = meta.empleo?.tiene_empleo || 'No';
@@ -178,6 +182,16 @@ export default function Dashboard({ token, selectedRefugio }) {
             });
           }
         }
+      });
+
+      households.forEach(household => {
+        if (household.condition === 'Colapso total / Destruida') countHousingDestruida++;
+        else if (household.condition === 'Daño estructural grave (Inhabitable)') countHousingInhabitable++;
+        else countHousingLeve++;
+
+        if (household.tenure === 'Propietario') countTenurePropietario++;
+        else if (household.tenure === 'Inquilino') countTenureInquilino++;
+        else if (household.tenure === 'Vivo en casa de familiares') countTenureFamiliares++;
       });
 
       // Update state states

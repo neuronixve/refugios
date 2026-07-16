@@ -11,6 +11,8 @@ export default function Families({ token }) {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const [merging, setMerging] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
@@ -46,6 +48,7 @@ export default function Families({ token }) {
     setSelectedFamily(family);
     setEditingName(family.family_name);
     setMembers([]);
+    setMergeTargetId('');
     setError('');
     try {
       const response = await fetch(`${API_BASE}/damnificados?family_group_id=${family.id}&refugio_id=${refugioId}`, { headers: authHeaders });
@@ -86,6 +89,33 @@ export default function Families({ token }) {
 
   const getMetadata = (resident) => {
     try { return JSON.parse(resident.special_needs || '{}'); } catch { return {}; }
+  };
+
+  const mergeFamily = async () => {
+    if (!mergeTargetId) {
+      setError('Seleccione la familia correcta que conservará todos los integrantes.');
+      return;
+    }
+    const target = families.find(family => family.id === parseInt(mergeTargetId));
+    if (!target || !window.confirm(`¿Unificar "${selectedFamily.family_name}" dentro de "${target.family_name}"? Los residentes se moverán a la familia seleccionada y el grupo duplicado desaparecerá.`)) return;
+    setMerging(true);
+    setError('');
+    try {
+      const response = await fetch(`${API_BASE}/family-groups/merge`, {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_id: selectedFamily.id, target_id: target.id, refugio_id: parseInt(refugioId) })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'No se pudieron unificar las familias.');
+      setSelectedFamily(null);
+      setMessage(`Familias unificadas correctamente. Se trasladaron ${data.moved_members} integrantes sin borrar sus fichas.`);
+      await fetchFamilies();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setMerging(false);
+    }
   };
 
   return (
@@ -150,10 +180,24 @@ export default function Families({ token }) {
                     const metadata = getMetadata(resident);
                     return <div key={resident.id} className="p-4 border-b last:border-b-0 border-outline-variant flex items-center justify-between gap-4">
                       <div><p className="text-xs font-bold text-on-surface">{resident.first_name} {resident.last_name}</p><p className="text-[10px] text-on-surface-variant">C.I. {resident.document_id || 'N/T'} · {metadata.es_cabeza_familia ? 'Cabeza de familia' : (metadata.parentesco || 'Familiar')}</p></div>
-                      <span className={`px-2 py-1 rounded-full text-[9px] font-bold ${resident.status === 'Activo' ? 'bg-success/10 text-success' : 'bg-outline-variant text-on-surface-variant'}`}>{resident.status}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-1 rounded-full text-[9px] font-bold ${resident.status === 'Activo' ? 'bg-success/10 text-success' : 'bg-outline-variant text-on-surface-variant'}`}>{resident.status}</span>
+                        <button type="button" onClick={() => navigate(`/refugio/${refugioId}/residentes?edit_resident=${resident.id}`)} className="px-3 py-1.5 border border-primary text-primary rounded-lg text-[10px] font-bold flex items-center gap-1"><span className="material-symbols-outlined text-xs">edit</span>Editar ficha</button>
+                      </div>
                     </div>;
                   })}
                   {members.length === 0 && <p className="p-6 text-center text-xs text-on-surface-variant">Esta familia no tiene integrantes registrados.</p>}
+                </div>
+              </div>
+              <div className="border border-warning/40 bg-warning/5 rounded-xl p-4">
+                <h4 className="text-xs font-extrabold text-on-surface">Corregir familia duplicada</h4>
+                <p className="text-[10px] text-on-surface-variant mt-1 mb-3">Seleccione la familia correcta. Todos los integrantes de este grupo se trasladarán allí y este registro duplicado será eliminado.</p>
+                <div className="flex flex-col md:flex-row gap-2">
+                  <select value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)} className="flex-1 bg-surface border border-outline-variant rounded-lg p-2.5 text-xs">
+                    <option value="">-- Seleccione la familia que se conservará --</option>
+                    {families.filter(family => family.id !== selectedFamily.id).map(family => <option key={family.id} value={family.id}>{family.family_name}</option>)}
+                  </select>
+                  <button type="button" disabled={merging || !mergeTargetId} onClick={mergeFamily} className="px-4 py-2.5 bg-warning text-on-surface rounded-lg text-xs font-bold disabled:opacity-50">{merging ? 'Unificando...' : 'Unificar familias'}</button>
                 </div>
               </div>
             </div>

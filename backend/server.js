@@ -676,6 +676,10 @@ app.post('/api/family-groups', authenticateToken, async (req, res) => {
   const { family_name, block_assignment } = req.body;
   if (!family_name) return res.status(400).json({ error: 'El nombre de la familia es requerido.' });
   try {
+    const duplicate = await db.query('SELECT id, family_name FROM family_groups WHERE LOWER(TRIM(family_name)) = LOWER(TRIM($1)) LIMIT 1', [family_name]);
+    if (duplicate.rows.length > 0) {
+      return res.status(409).json({ error: 'Ya existe una familia con ese mismo nombre. Use la opción de unificar familias si se trata de un duplicado.', existing_family: duplicate.rows[0] });
+    }
     const result = await db.query(
       'INSERT INTO family_groups (family_name, block_assignment) VALUES ($1, $2) RETURNING *',
       [family_name, block_assignment]
@@ -692,6 +696,13 @@ app.put('/api/family-groups/:id', authenticateToken, async (req, res) => {
   const { family_name, block_assignment } = req.body;
   if (!family_name || !family_name.trim()) return res.status(400).json({ error: 'El nombre de la familia es requerido.' });
   try {
+    const duplicate = await db.query(
+      'SELECT id FROM family_groups WHERE LOWER(TRIM(family_name)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1',
+      [family_name, id]
+    );
+    if (duplicate.rows.length > 0) {
+      return res.status(409).json({ error: 'Ya existe otra familia con ese mismo nombre. Unifique ambos grupos en lugar de renombrarlos igual.' });
+    }
     const result = await db.query(
       'UPDATE family_groups SET family_name = $1, block_assignment = $2 WHERE id = $3 RETURNING *',
       [family_name.trim(), block_assignment || null, id]
@@ -701,6 +712,62 @@ app.put('/api/family-groups/:id', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al actualizar el grupo familiar.' });
+  }
+});
+
+app.post('/api/family-groups/merge', authenticateToken, async (req, res) => {
+  const sourceId = parseInt(req.body.source_id);
+  const targetId = parseInt(req.body.target_id);
+  const refugioId = parseInt(req.body.refugio_id);
+  if (!sourceId || !targetId || !refugioId || sourceId === targetId) {
+    return res.status(400).json({ error: 'Seleccione dos familias diferentes y una sede válida.' });
+  }
+
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const groups = await client.query('SELECT id, family_name FROM family_groups WHERE id = ANY($1::int[]) FOR UPDATE', [[sourceId, targetId]]);
+    if (groups.rows.length !== 2) throw Object.assign(new Error('Una de las familias no existe.'), { status: 404 });
+
+    const outsideScope = await client.query(
+      `SELECT COUNT(*)::int AS count FROM damnificados
+       WHERE family_group_id = ANY($1::int[]) AND refugio_id IS DISTINCT FROM $2`,
+      [[sourceId, targetId], refugioId]
+    );
+    if (outsideScope.rows[0].count > 0) {
+      throw Object.assign(new Error('No se puede unificar porque una familia contiene residentes de otra sede.'), { status: 409 });
+    }
+
+    const sourceMembers = await client.query(
+      'SELECT id, special_needs FROM damnificados WHERE family_group_id = $1 AND refugio_id = $2 FOR UPDATE',
+      [sourceId, refugioId]
+    );
+    for (const member of sourceMembers.rows) {
+      try {
+        const metadata = JSON.parse(member.special_needs || '{}');
+        if (metadata.es_cabeza_familia === true) {
+          metadata.es_cabeza_familia = false;
+          metadata.parentesco = metadata.parentesco || 'Familiar';
+          await client.query('UPDATE damnificados SET special_needs = $1 WHERE id = $2', [JSON.stringify(metadata), member.id]);
+        }
+      } catch {
+        // Preserve legacy metadata that is not valid JSON; the family link can still be corrected safely.
+      }
+    }
+
+    const moved = await client.query(
+      'UPDATE damnificados SET family_group_id = $1 WHERE family_group_id = $2 AND refugio_id = $3 RETURNING id',
+      [targetId, sourceId, refugioId]
+    );
+    await client.query('DELETE FROM family_groups WHERE id = $1', [sourceId]);
+    await client.query('COMMIT');
+    res.json({ message: 'Familias unificadas correctamente.', moved_members: moved.rowCount, target_family_id: targetId });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(err.status || 500).json({ error: err.message || 'Error al unificar las familias.' });
+  } finally {
+    client.release();
   }
 });
 

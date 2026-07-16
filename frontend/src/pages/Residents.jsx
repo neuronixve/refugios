@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { csvDateStamp, downloadCsv } from '../utils/exportCsv';
 
 const VENEZUELA_STATES = [
@@ -34,6 +34,8 @@ const compressImage = (file) => {
 
 export default function Residents({ token }) {
   const { refugioId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openedResidentFromUrl = useRef(null);
   
   // Resident data states
   const [residents, setResidents] = useState([]);
@@ -431,6 +433,18 @@ export default function Residents({ token }) {
     setError('');
     setEditModalOpen(true);
   };
+
+  useEffect(() => {
+    const requestedId = searchParams.get('edit_resident');
+    if (!requestedId || residents.length === 0 || openedResidentFromUrl.current === requestedId) return;
+    const resident = residents.find(item => String(item.id) === requestedId);
+    if (!resident) return;
+    openedResidentFromUrl.current = requestedId;
+    handleOpenEdit(resident);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('edit_resident');
+    setSearchParams(nextParams, { replace: true });
+  }, [residents, searchParams, setSearchParams]);
 
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
@@ -841,6 +855,7 @@ export default function Residents({ token }) {
                   <p className="text-[10px] text-on-surface-variant">
                     C.I. {selectedResident.document_id || 'N/T'} | Cama: {selectedResident.bedInfo}
                   </p>
+                  <p className="text-[10px] font-bold text-primary mt-0.5">Familia: {selectedResident.family_name || 'Residente individual / Sin grupo familiar'}</p>
                 </div>
               </div>
               <button onClick={() => setViewModalOpen(false)} className="text-on-surface-variant hover:bg-surface-container rounded-full p-2">
@@ -1040,7 +1055,7 @@ export default function Residents({ token }) {
           <div className="bg-surface rounded-2xl border border-outline-variant p-6 w-full max-w-2xl shadow-lg max-h-[90vh] overflow-y-auto custom-scrollbar animate-in fade-in zoom-in-95 duration-200">
             
             <div className="flex justify-between items-center mb-6 border-b border-outline-variant pb-3">
-              <h3 className="text-md font-bold text-primary">Editar Perfil de Residente</h3>
+              <div><h3 className="text-md font-bold text-primary">Editar Perfil de Residente</h3><p className="text-[10px] text-on-surface-variant mt-1">Familia: <strong className="text-primary">{selectedResident.family_name || 'Sin grupo familiar'}</strong></p></div>
               <button onClick={() => setEditModalOpen(false)} className="text-on-surface-variant hover:bg-surface-container rounded-full p-2">
                 <span className="material-symbols-outlined">close</span>
               </button>
