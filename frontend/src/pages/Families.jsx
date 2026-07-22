@@ -156,7 +156,7 @@ export default function Families({ token }) {
           <h2 className="text-2xl font-extrabold text-primary">Familias Registradas</h2>
           <p className="text-xs text-on-surface-variant">Consulte, corrija y amplíe los núcleos familiares del campamento temporal.</p>
         </div>
-        <button type="button" onClick={exportFamilies} disabled={exporting || loading} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-success text-white rounded-lg text-xs font-bold disabled:opacity-50">
+        <button type="button" onClick={exportFamilies} disabled={exporting || loading} className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-primary text-on-primary border border-primary rounded-lg text-xs font-bold shadow-sm hover:opacity-90 disabled:opacity-50 transition-opacity">
           <span className="material-symbols-outlined text-base">download</span>
           {exporting ? 'Generando Excel...' : 'Exportar reporte Excel'}
         </button>
