@@ -50,7 +50,8 @@ export default function Reports({ token }) {
     unemployedCount: 0,
     totalAdults: 0,
     lostHomeFamiliesCount: 0,
-    lostHomePeopleCount: 0
+    lostHomePeopleCount: 0,
+    petsCount: 0
   });
 
   const API_BASE = window.location.hostname === 'localhost'
@@ -235,6 +236,7 @@ export default function Reports({ token }) {
     let totalAdults = 0;
     let lostHomeFamilies = new Set();
     let lostHomePeopleCount = 0;
+    let petsCount = 0;
 
     list.forEach(r => {
       // Gender
@@ -248,6 +250,8 @@ export default function Reports({ token }) {
       } catch {
         meta = {};
       }
+
+      if (meta.mascotas?.tiene_mascotas === 'Sí') petsCount++;
 
       // SAIME: People without document ID
       const noCedulaId = !r.document_id || r.document_id.trim() === '' || r.document_id.toLowerCase().startsWith('temp') || r.document_id.toLowerCase().startsWith('sin');
@@ -389,7 +393,8 @@ export default function Reports({ token }) {
       unemployedCount,
       totalAdults,
       lostHomeFamiliesCount: lostHomeFamilies.size,
-      lostHomePeopleCount
+      lostHomePeopleCount,
+      petsCount
     });
   };
 
@@ -702,7 +707,7 @@ export default function Reports({ token }) {
         <div className="flex flex-col gap-8">
           
           {/* SECTION 1: KEY PERFORMANCE INDICATORS */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             
             {/* KPI 1: POBLACIÓN TOTAL */}
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-2xs flex flex-col gap-2">
@@ -764,7 +769,20 @@ export default function Reports({ token }) {
               </div>
             </div>
 
-            {/* KPI 4: INCIDENCIAS */}
+            {/* KPI 4: MASCOTAS */}
+            <div className="bg-surface-container-lowest border border-success/30 rounded-2xl p-5 shadow-2xs flex flex-col gap-2">
+              <div className="flex justify-between items-start">
+                <span className="text-[9px] font-black text-on-surface-variant uppercase tracking-wider">Mascotas en el refugio</span>
+                <span className="material-symbols-outlined text-success text-lg no-print">pets</span>
+              </div>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-3xl font-black text-on-surface">{stats.petsCount}</span>
+                <span className="text-[10px] text-on-surface-variant font-bold">Mascotas</span>
+              </div>
+              <div className="text-[10px] text-on-surface-variant border-t border-outline-variant/30 pt-2 mt-1 font-semibold">Censo animal declarado por las familias</div>
+            </div>
+
+            {/* KPI 5: INCIDENCIAS */}
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-2xs flex flex-col gap-2">
               <div className="flex justify-between items-start">
                 <span className="text-[9px] font-black text-on-surface-variant uppercase tracking-wider">Reportes de Seguridad</span>

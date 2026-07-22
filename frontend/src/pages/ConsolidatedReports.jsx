@@ -50,7 +50,8 @@ export default function ConsolidatedReports({ token }) {
     unemployedCount: 0,
     totalAdults: 0,
     lostHomeFamiliesCount: 0,
-    lostHomePeopleCount: 0
+    lostHomePeopleCount: 0,
+    petsCount: 0
   });
 
   const API_BASE = window.location.hostname === 'localhost'
@@ -217,6 +218,7 @@ export default function ConsolidatedReports({ token }) {
     let totalAdults = 0;
     let lostHomeFamilies = new Set();
     let lostHomePeopleCount = 0;
+    let petsCount = 0;
 
     list.forEach(r => {
       if (r.gender === 'Masculino') males++;
@@ -228,6 +230,8 @@ export default function ConsolidatedReports({ token }) {
       } catch {
         meta = {};
       }
+
+      if (meta.mascotas?.tiene_mascotas === 'Sí') petsCount++;
 
       // SAIME: People without document ID
       const noCedulaId = !r.document_id || r.document_id.trim() === '' || r.document_id.toLowerCase().startsWith('temp') || r.document_id.toLowerCase().startsWith('sin');
@@ -364,7 +368,8 @@ export default function ConsolidatedReports({ token }) {
       unemployedCount,
       totalAdults,
       lostHomeFamiliesCount: lostHomeFamilies.size,
-      lostHomePeopleCount
+      lostHomePeopleCount,
+      petsCount
     });
   };
 
@@ -712,7 +717,7 @@ export default function ConsolidatedReports({ token }) {
         <div className="flex flex-col gap-8">
           
           {/* SECTION 1: GLOBAL KPIs */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             
             {/* KPI 1: TOTAL REFUGIOS */}
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-2xs flex flex-col gap-2">
@@ -761,7 +766,20 @@ export default function ConsolidatedReports({ token }) {
               </div>
             </div>
 
-            {/* KPI 4: SEGURIDAD INCIDENCIAS */}
+            {/* KPI 4: MASCOTAS */}
+            <div className="bg-surface-container-lowest border border-success/30 rounded-2xl p-5 shadow-2xs flex flex-col gap-2">
+              <div className="flex justify-between items-start">
+                <span className="text-[9px] font-black text-on-surface-variant uppercase tracking-wider">Mascotas registradas</span>
+                <span className="material-symbols-outlined text-success text-lg no-print">pets</span>
+              </div>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-3xl font-black text-on-surface">{stats.petsCount}</span>
+                <span className="text-[10px] text-on-surface-variant font-bold">Mascotas</span>
+              </div>
+              <div className="text-[10px] text-on-surface-variant border-t border-outline-variant/30 pt-2 mt-1 font-semibold">Total según el ámbito seleccionado</div>
+            </div>
+
+            {/* KPI 5: SEGURIDAD INCIDENCIAS */}
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-2xs flex flex-col gap-2">
               <div className="flex justify-between items-start">
                 <span className="text-[9px] font-black text-on-surface-variant uppercase tracking-wider">Incidencias Consolidadas</span>
@@ -875,6 +893,7 @@ export default function ConsolidatedReports({ token }) {
                     <th className="py-2.5 px-3 rounded-l-lg">Nombre del Campamento Temporal</th>
                     <th className="py-2.5 px-3">Ubicación / Estado</th>
                     <th className="py-2.5 px-3 text-center">Censo Activo</th>
+                    <th className="py-2.5 px-3 text-center">Mascotas</th>
                     <th className="py-2.5 px-3 text-center">Ocupación Camas</th>
                     <th className="py-2.5 px-3 text-center">Casos Médicos</th>
                     <th className="py-2.5 px-3 text-center rounded-r-lg">Alertas Críticas Stock</th>
@@ -888,6 +907,9 @@ export default function ConsolidatedReports({ token }) {
                       const totalBedsCount = refBeds.length;
                       const occupiedBedsCount = refBeds.filter(b => b.status === 'Ocupada').length;
                       const bedsText = totalBedsCount > 0 ? `${occupiedBedsCount}/${totalBedsCount} (${Math.round((occupiedBedsCount/totalBedsCount)*100)}%)` : '0/0';
+                      const refPetsCount = refResidents.filter(resident => {
+                        try { return JSON.parse(resident.special_needs || '{}').mascotas?.tiene_mascotas === 'Sí'; } catch { return false; }
+                      }).length;
                       
                       // Critical cases count
                       const medicalCritical = refResidents.filter(r => r.health_status !== 'Estable').length;
@@ -900,6 +922,7 @@ export default function ConsolidatedReports({ token }) {
                           <td className="py-3 px-3 font-bold text-primary">{ref.name}</td>
                           <td className="py-3 px-3 text-on-surface-variant font-semibold">{ref.estado || ref.location}</td>
                           <td className="py-3 px-3 text-center font-bold">{refResidents.length} res.</td>
+                          <td className="py-3 px-3 text-center font-bold text-success">{refPetsCount}</td>
                           <td className="py-3 px-3 text-center font-semibold text-on-surface">{bedsText}</td>
                           <td className="py-3 px-3 text-center">
                             {medicalCritical > 0 ? (
@@ -924,7 +947,7 @@ export default function ConsolidatedReports({ token }) {
                     })
                   ) : (
                     <tr>
-                      <td colSpan="6" className="py-8 text-center text-on-surface-variant italic">No se encontraron sedes operativas registradas en el ámbito territorial seleccionado.</td>
+                      <td colSpan="7" className="py-8 text-center text-on-surface-variant italic">No se encontraron sedes operativas registradas en el ámbito territorial seleccionado.</td>
                     </tr>
                   )}
                 </tbody>

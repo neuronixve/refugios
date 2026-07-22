@@ -92,6 +92,18 @@ export default function Families({ token }) {
     try { return JSON.parse(resident.special_needs || '{}'); } catch { return {}; }
   };
 
+  const familyPets = useMemo(() => members.flatMap(resident => {
+    const pet = getMetadata(resident).mascotas;
+    if (pet?.tiene_mascotas !== 'Sí') return [];
+    return [{
+      id: `pet-${resident.id}`,
+      name: pet.nombre?.trim() || 'Mascota sin nombre',
+      species: pet.especie?.trim() || 'Especie no indicada',
+      breed: pet.raza?.trim() || 'Raza no indicada',
+      owner: `${resident.first_name} ${resident.last_name}`
+    }];
+  }), [members]);
+
   const mergeFamily = async () => {
     if (!mergeTargetId) {
       setError('Seleccione la familia correcta que conservará todos los integrantes.');
@@ -179,13 +191,21 @@ export default function Families({ token }) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filteredFamilies.map(family => (
-            <article key={family.id} className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-xs">
+            <article key={family.id} className={`bg-surface-container-lowest border rounded-2xl p-5 shadow-xs ${family.pets_count > 0 ? 'border-success/50 ring-1 ring-success/10' : 'border-outline-variant'}`}>
               <div className="flex items-start justify-between gap-3">
-                <div className="w-10 h-10 bg-primary/10 text-primary rounded-xl flex items-center justify-center"><span className="material-symbols-outlined">family_restroom</span></div>
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 bg-primary/10 text-primary rounded-xl flex items-center justify-center"><span className="material-symbols-outlined">family_restroom</span></div>
+                  {family.pets_count > 0 && (
+                    <span className="inline-flex items-center gap-1 px-2 py-1 bg-success/10 text-success border border-success/20 rounded-full text-[9px] font-extrabold uppercase tracking-wide">
+                      <span className="material-symbols-outlined text-xs">pets</span>
+                      Con mascota
+                    </span>
+                  )}
+                </div>
                 <span className="px-2 py-1 bg-success/10 text-success rounded-full text-[9px] font-bold">{family.members_count} activos</span>
               </div>
               <h3 className="mt-4 text-sm font-extrabold text-on-surface">{family.family_name}</h3>
-              <p className="mt-1 text-[10px] text-on-surface-variant">Total histórico: {family.total_members} · Espacio: {family.block_assignment || 'Sin asignar'}</p>
+              <p className="mt-1 text-[10px] text-on-surface-variant">Total histórico: {family.total_members} personas · {family.pets_count || 0} {(family.pets_count || 0) === 1 ? 'mascota' : 'mascotas'} · Espacio: {family.block_assignment || 'Sin asignar'}</p>
               <div className="mt-5 flex gap-2">
                 <button onClick={() => openFamily(family)} className="flex-1 px-3 py-2 border border-primary text-primary rounded-lg text-[10px] font-bold">Ver y editar</button>
                 <button onClick={() => navigate(`/refugio/${refugioId}/registro?family_group_id=${family.id}`)} className="flex-1 px-3 py-2 bg-primary text-on-primary rounded-lg text-[10px] font-bold">Añadir miembro</button>
@@ -211,7 +231,10 @@ export default function Families({ token }) {
                 <button onClick={() => navigate(`/refugio/${refugioId}/registro?family_group_id=${selectedFamily.id}`)} className="px-4 py-2.5 bg-success text-white rounded-lg text-xs font-bold">Añadir miembro</button>
               </div>
               <div>
-                <h4 className="text-xs font-extrabold uppercase tracking-wide text-on-surface-variant mb-3">Integrantes ({members.length})</h4>
+                <div className="flex items-end justify-between gap-3 mb-3">
+                  <h4 className="text-xs font-extrabold uppercase tracking-wide text-on-surface-variant">Integrantes ({members.length + familyPets.length})</h4>
+                  {familyPets.length > 0 && <span className="text-[9px] font-bold text-on-surface-variant">{members.length} personas · {familyPets.length} {familyPets.length === 1 ? 'mascota' : 'mascotas'}</span>}
+                </div>
                 <div className="border border-outline-variant rounded-xl overflow-hidden">
                   {members.map(resident => {
                     const metadata = getMetadata(resident);
@@ -223,7 +246,19 @@ export default function Families({ token }) {
                       </div>
                     </div>;
                   })}
-                  {members.length === 0 && <p className="p-6 text-center text-xs text-on-surface-variant">Esta familia no tiene integrantes registrados.</p>}
+                  {familyPets.map(pet => (
+                    <div key={pet.id} className="p-4 border-b last:border-b-0 border-outline-variant bg-success/5 flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-success/10 text-success flex items-center justify-center shrink-0"><span className="material-symbols-outlined">pets</span></div>
+                        <div>
+                          <p className="text-xs font-bold text-on-surface">{pet.name}</p>
+                          <p className="text-[10px] text-on-surface-variant">{pet.species} · {pet.breed} · Responsable: {pet.owner}</p>
+                        </div>
+                      </div>
+                      <span className="px-2 py-1 rounded-full text-[9px] font-bold bg-success/10 text-success">Mascota</span>
+                    </div>
+                  ))}
+                  {members.length === 0 && familyPets.length === 0 && <p className="p-6 text-center text-xs text-on-surface-variant">Esta familia no tiene integrantes registrados.</p>}
                 </div>
               </div>
               <div className="border border-warning/40 bg-warning/5 rounded-xl p-4">

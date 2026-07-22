@@ -659,7 +659,11 @@ app.get('/api/family-groups', authenticateToken, async (req, res) => {
     const result = await db.query(`
       SELECT fg.*,
              COUNT(d.id) FILTER (WHERE d.status = 'Activo')::int as members_count,
-             COUNT(d.id)::int as total_members
+             COUNT(d.id)::int as total_members,
+             COUNT(d.id) FILTER (
+               WHERE d.status = 'Activo'
+                 AND d.special_needs ~ '"tiene_mascotas"\\s*:\\s*"Sí"'
+             )::int as pets_count
       FROM family_groups fg
       LEFT JOIN damnificados d ON fg.id = d.family_group_id
       ${scope}
