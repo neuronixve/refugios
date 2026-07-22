@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const db = require('./db');
+const { buildFamilyReport, parseMetadata } = require('./familyReport');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -669,6 +670,55 @@ app.get('/api/family-groups', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al obtener grupos familiares.' });
+  }
+});
+
+app.get('/api/family-groups/export', authenticateToken, async (req, res) => {
+  const refugioId = parseInt(req.query.refugio_id);
+  if (!refugioId) return res.status(400).json({ error: 'La sede es requerida para generar el reporte.' });
+
+  try {
+    const refugioResult = await db.query('SELECT id, name, location FROM refugios WHERE id = $1', [refugioId]);
+    if (refugioResult.rows.length === 0) return res.status(404).json({ error: 'Campamento temporal no encontrado.' });
+
+    const residentsResult = await db.query(
+      `SELECT fg.id AS family_group_id, fg.family_name, d.*
+       FROM family_groups fg
+       INNER JOIN damnificados d ON d.family_group_id = fg.id
+       WHERE d.refugio_id = $1 AND d.status = 'Activo'
+       ORDER BY fg.family_name ASC, d.created_at ASC`,
+      [refugioId]
+    );
+
+    const grouped = new Map();
+    residentsResult.rows.forEach(resident => {
+      if (!grouped.has(resident.family_group_id)) {
+        grouped.set(resident.family_group_id, { id: resident.family_group_id, family_name: resident.family_name, members: [] });
+      }
+      grouped.get(resident.family_group_id).members.push(resident);
+    });
+
+    const families = Array.from(grouped.values()).map(family => ({
+      ...family,
+      members: family.members.sort((left, right) => {
+        const leftHead = parseMetadata(left.special_needs).es_cabeza_familia === true ? 0 : 1;
+        const rightHead = parseMetadata(right.special_needs).es_cabeza_familia === true ? 0 : 1;
+        return leftHead - rightHead || `${left.first_name} ${left.last_name}`.localeCompare(`${right.first_name} ${right.last_name}`, 'es');
+      })
+    }));
+
+    const report = await buildFamilyReport({
+      refugio: refugioResult.rows[0],
+      responsibleName: req.user?.name || '',
+      families
+    });
+    const safeName = refugioResult.rows[0].name.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ_-]+/g, '_');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="DATA_UNICA_${safeName}.xlsx"`);
+    res.send(Buffer.from(report));
+  } catch (err) {
+    console.error('Error al exportar reporte de familias:', err);
+    res.status(500).json({ error: 'No se pudo generar el reporte Excel de familias.' });
   }
 });
 

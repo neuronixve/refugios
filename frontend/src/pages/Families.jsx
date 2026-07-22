@@ -15,6 +15,7 @@ export default function Families({ token }) {
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
@@ -118,11 +119,47 @@ export default function Families({ token }) {
     }
   };
 
+  const exportFamilies = async () => {
+    setExporting(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await fetch(`${API_BASE}/family-groups/export?refugio_id=${refugioId}`, { headers: authHeaders });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'No se pudo generar el reporte Excel.');
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+      const filename = filenameMatch?.[1] || 'DATA_UNICA_DE_CAMPAMENTO.xlsx';
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setMessage('Reporte Excel generado correctamente.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <header className="mb-8">
-        <h2 className="text-2xl font-extrabold text-primary">Familias Registradas</h2>
-        <p className="text-xs text-on-surface-variant">Consulte, corrija y amplíe los núcleos familiares del campamento temporal.</p>
+      <header className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-extrabold text-primary">Familias Registradas</h2>
+          <p className="text-xs text-on-surface-variant">Consulte, corrija y amplíe los núcleos familiares del campamento temporal.</p>
+        </div>
+        <button type="button" onClick={exportFamilies} disabled={exporting || loading} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-success text-white rounded-lg text-xs font-bold disabled:opacity-50">
+          <span className="material-symbols-outlined text-base">download</span>
+          {exporting ? 'Generando Excel...' : 'Exportar reporte Excel'}
+        </button>
       </header>
 
       {error && <div className="mb-5 p-4 bg-error-container/20 border border-error/25 text-error rounded-xl text-xs font-semibold">{error}</div>}
