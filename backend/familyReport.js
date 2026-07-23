@@ -95,16 +95,21 @@ async function buildFamilyReport({ refugio, responsibleName, families }) {
   let laGuairaPeople = 0;
   let caracasFamilies = 0;
   let laGuairaFamilies = 0;
+  let soloResidents = 0;
+  let totalResidents = 0;
 
   families.forEach((family, familyIndex) => {
     const members = family.members.length ? family.members : [null];
     const startRow = currentRow;
     const origins = new Set();
+    if (family.isSolo) soloResidents += family.members.length;
+    totalResidents += family.members.length;
 
     members.forEach((resident, memberIndex) => {
       const isFirst = memberIndex === 0;
       const isLast = memberIndex === members.length - 1;
       applyRowStyle(worksheet, currentRow, isFirst ? firstStyles : (isLast ? lastStyles : middleStyles), lastStyles, isLast);
+      if (family.isSolo) worksheet.getRow(currentRow).height = 60;
 
       if (resident) {
         const metadata = parseMetadata(resident.special_needs);
@@ -122,7 +127,9 @@ async function buildFamilyReport({ refugio, responsibleName, families }) {
         worksheet.getCell(`F${currentRow}`).numFmt = '@';
         worksheet.getCell(`G${currentRow}`).value = calculateAge(resident.birth_date);
         worksheet.getCell(`G${currentRow}`).numFmt = '0';
-        worksheet.getCell(`H${currentRow}`).value = metadata.es_cabeza_familia ? 'Cabeza de familia' : (metadata.parentesco || 'Familiar');
+        worksheet.getCell(`H${currentRow}`).value = family.isSolo
+          ? 'Persona sola / Sin grupo familiar'
+          : (metadata.es_cabeza_familia ? 'Cabeza de familia' : (metadata.parentesco || 'Familiar'));
         worksheet.getCell(`H${currentRow}`).numFmt = '@';
         worksheet.getCell(`I${currentRow}`).value = metadata.telefono_contacto || null;
         worksheet.getCell(`I${currentRow}`).numFmt = '@';
@@ -143,11 +150,11 @@ async function buildFamilyReport({ refugio, responsibleName, families }) {
 
     if (origins.has('caracas')) {
       worksheet.getCell(`J${startRow}`).value = 'X';
-      caracasFamilies++;
+      if (!family.isSolo) caracasFamilies++;
     }
     if (origins.has('la_guaira')) {
       worksheet.getCell(`K${startRow}`).value = 'X';
-      laGuairaFamilies++;
+      if (!family.isSolo) laGuairaFamilies++;
     }
     worksheet.getCell(`J${startRow}`).alignment = { vertical: 'middle', horizontal: 'center' };
     worksheet.getCell(`K${startRow}`).alignment = { vertical: 'middle', horizontal: 'center' };
@@ -165,11 +172,23 @@ async function buildFamilyReport({ refugio, responsibleName, families }) {
   currentRow += 3;
   const totalsFirstRow = currentRow;
   const totalsSecondRow = currentRow + 1;
-  [totalsFirstRow, totalsSecondRow].forEach(rowNumber => { worksheet.getRow(rowNumber).height = 60; });
+  const solosTotalRow = currentRow + 2;
+  const residentsTotalRow = currentRow + 3;
+  [totalsFirstRow, totalsSecondRow, solosTotalRow, residentsTotalRow].forEach(rowNumber => {
+    worksheet.getRow(rowNumber).height = 60;
+  });
   for (let column = 1; column <= 9; column++) {
     worksheet.getRow(totalsFirstRow).getCell(column).style = clone(totalFirstRowStyles[column - 1]);
     worksheet.getRow(totalsSecondRow).getCell(column).style = clone(totalSecondRowStyles[column - 1]);
+    worksheet.getRow(solosTotalRow).getCell(column).style = clone(totalFirstRowStyles[column - 1]);
+    worksheet.getRow(residentsTotalRow).getCell(column).style = clone(totalSecondRowStyles[column - 1]);
   }
+  [totalsFirstRow, totalsSecondRow, solosTotalRow, residentsTotalRow].forEach(rowNumber => {
+    for (let column = 10; column <= 12; column++) {
+      worksheet.getRow(rowNumber).getCell(column).value = null;
+      worksheet.getRow(rowNumber).getCell(column).style = {};
+    }
+  });
 
   worksheet.getCell(`C${totalsFirstRow}`).value = 'TOTAL FAMILIAS DE CARACAS:';
   worksheet.getCell(`C${totalsSecondRow}`).value = 'TOTAL PERSONAS DE CARACAS';
@@ -182,8 +201,8 @@ async function buildFamilyReport({ refugio, responsibleName, families }) {
 
   worksheet.mergeCells(`F${totalsFirstRow}:H${totalsFirstRow}`);
   worksheet.mergeCells(`F${totalsSecondRow}:H${totalsSecondRow}`);
-  worksheet.getCell(`F${totalsFirstRow}`).value = 'TOTAL FAMILIAS DE CARACAS:';
-  worksheet.getCell(`F${totalsSecondRow}`).value = 'TOTAL PERSONAS DE CARACAS';
+  worksheet.getCell(`F${totalsFirstRow}`).value = 'TOTAL FAMILIAS DE LA GUAIRA:';
+  worksheet.getCell(`F${totalsSecondRow}`).value = 'TOTAL PERSONAS DE LA GUAIRA';
   worksheet.getCell(`I${totalsFirstRow}`).value = laGuairaFamilies;
   worksheet.getCell(`I${totalsSecondRow}`).value = laGuairaPeople;
   worksheet.getCell(`F${totalsFirstRow}`).style = clone(totalRightLabelStyle);
@@ -191,13 +210,24 @@ async function buildFamilyReport({ refugio, responsibleName, families }) {
   worksheet.getCell(`I${totalsFirstRow}`).style = clone(totalValueStyle);
   worksheet.getCell(`I${totalsSecondRow}`).style = clone(totalValueStyle);
 
-  for (let rowNumber = totalsSecondRow + 1; rowNumber <= 51; rowNumber++) {
+  worksheet.mergeCells(`C${solosTotalRow}:H${solosTotalRow}`);
+  worksheet.mergeCells(`C${residentsTotalRow}:H${residentsTotalRow}`);
+  worksheet.getCell(`C${solosTotalRow}`).value = 'TOTAL PERSONAS SOLAS / SIN GRUPO FAMILIAR:';
+  worksheet.getCell(`C${residentsTotalRow}`).value = 'TOTAL GENERAL DE RESIDENTES ACTIVOS:';
+  worksheet.getCell(`I${solosTotalRow}`).value = soloResidents;
+  worksheet.getCell(`I${residentsTotalRow}`).value = totalResidents;
+  worksheet.getCell(`C${solosTotalRow}`).style = clone(totalRightLabelStyle);
+  worksheet.getCell(`C${residentsTotalRow}`).style = clone(totalRightLabelStyle);
+  worksheet.getCell(`I${solosTotalRow}`).style = clone(totalValueStyle);
+  worksheet.getCell(`I${residentsTotalRow}`).style = clone(totalValueStyle);
+
+  for (let rowNumber = residentsTotalRow + 1; rowNumber <= 51; rowNumber++) {
     for (let column = 1; column <= 12; column++) {
       worksheet.getRow(rowNumber).getCell(column).value = null;
       worksheet.getRow(rowNumber).getCell(column).style = {};
     }
   }
-  worksheet.pageSetup.printArea = `A1:L${totalsSecondRow}`;
+  worksheet.pageSetup.printArea = `A1:L${residentsTotalRow}`;
   worksheet.views = [{ state: 'normal', showGridLines: false, zoomScale: 70 }];
   return workbook.xlsx.writeBuffer();
 }

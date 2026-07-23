@@ -686,20 +686,27 @@ app.get('/api/family-groups/export', authenticateToken, async (req, res) => {
     if (refugioResult.rows.length === 0) return res.status(404).json({ error: 'Campamento temporal no encontrado.' });
 
     const residentsResult = await db.query(
-      `SELECT fg.id AS family_group_id, fg.family_name, d.*
-       FROM family_groups fg
-       INNER JOIN damnificados d ON d.family_group_id = fg.id
+      `SELECT d.*, fg.family_name
+       FROM damnificados d
+       LEFT JOIN family_groups fg ON d.family_group_id = fg.id
        WHERE d.refugio_id = $1 AND d.status = 'Activo'
-       ORDER BY fg.family_name ASC, d.created_at ASC`,
+       ORDER BY (d.family_group_id IS NULL) ASC, fg.family_name ASC, d.created_at ASC`,
       [refugioId]
     );
 
     const grouped = new Map();
     residentsResult.rows.forEach(resident => {
-      if (!grouped.has(resident.family_group_id)) {
-        grouped.set(resident.family_group_id, { id: resident.family_group_id, family_name: resident.family_name, members: [] });
+      const isSolo = !resident.family_group_id;
+      const groupKey = isSolo ? `solo-${resident.id}` : `family-${resident.family_group_id}`;
+      if (!grouped.has(groupKey)) {
+        grouped.set(groupKey, {
+          id: resident.family_group_id,
+          family_name: isSolo ? 'SIN GRUPO FAMILIAR' : resident.family_name,
+          isSolo,
+          members: []
+        });
       }
-      grouped.get(resident.family_group_id).members.push(resident);
+      grouped.get(groupKey).members.push(resident);
     });
 
     const families = Array.from(grouped.values()).map(family => ({
