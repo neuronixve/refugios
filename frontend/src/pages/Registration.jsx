@@ -8,6 +8,21 @@ const VENEZUELA_STATES = [
   'Portuguesa', 'Sucre', 'Táchira', 'Trujillo', 'Yaracuy', 'Zulia'
 ];
 
+const calculateAgeFromBirthDate = (value) => {
+  if (!value) return null;
+
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - year;
+  const birthdayHasPassed = today.getMonth() + 1 > month
+    || (today.getMonth() + 1 === month && today.getDate() >= day);
+
+  if (!birthdayHasPassed) age -= 1;
+  return age >= 0 ? age : null;
+};
+
 // Helper function to compress image file to lightweight base64 string
 const compressImage = (file) => {
   return new Promise((resolve) => {
@@ -50,7 +65,8 @@ export default function Registration({ token }) {
   const [docId, setDocId] = useState('');
   const [gender, setGender] = useState('Masculino');
   const [birthDate, setBirthDate] = useState('');
-  const [calculatedAge, setCalculatedAge] = useState('--');
+  const [calculatedAge, setCalculatedAge] = useState(null);
+  const isMinor = calculatedAge !== null && calculatedAge < 18;
   
   // Photo state (Head)
   const [photo, setPhoto] = useState('');
@@ -168,18 +184,7 @@ export default function Registration({ token }) {
   }, [beds]);
 
   useEffect(() => {
-    if (birthDate) {
-      const birth = new Date(birthDate);
-      const today = new Date();
-      let age = today.getFullYear() - birth.getFullYear();
-      const m = today.getMonth() - birth.getMonth();
-      if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
-        age--;
-      }
-      setCalculatedAge(age >= 0 ? `${age} Años` : '0 Años');
-    } else {
-      setCalculatedAge('--');
-    }
+    setCalculatedAge(calculateAgeFromBirthDate(birthDate));
   }, [birthDate]);
 
   const fetchFamilies = async () => {
@@ -304,8 +309,12 @@ export default function Registration({ token }) {
 
   const handleNextStep = () => {
     if (step === 1) {
-      if (!fullName || !docId) {
-        setError('El nombre completo y la cédula son requeridos.');
+      if (!fullName.trim()) {
+        setError('El nombre completo es requerido.');
+        return;
+      }
+      if (!docId.trim() && !isMinor) {
+        setError('La cédula es requerida para adultos. Para registrar un menor sin cédula, indique su fecha de nacimiento.');
         return;
       }
       setError('');
@@ -317,6 +326,11 @@ export default function Registration({ token }) {
       }
       if (familyOption === 'new' && familyMembers.length === 0) {
         setError('Por favor, añada al menos un miembro familiar o seleccione residente individual.');
+        return;
+      }
+      const incompleteMemberIndex = familyMembers.findIndex(member => !member.name.trim());
+      if (familyOption === 'new' && incompleteMemberIndex !== -1) {
+        setError(`Debe indicar el nombre completo del familiar #${incompleteMemberIndex + 1}.`);
         return;
       }
       setError('');
@@ -366,9 +380,8 @@ export default function Registration({ token }) {
           const familyData = await resFamily.json();
           finalFamilyId = familyData.id;
         } else {
-          setError('Error al crear el grupo familiar único.');
-          setLoading(false);
-          return;
+          const familyError = await resFamily.json().catch(() => ({}));
+          throw new Error(familyError.error || 'Error al crear el grupo familiar único.');
         }
       } else if (familyOption === 'existing') {
         finalFamilyId = parseInt(selectedFamilyId);
@@ -404,9 +417,9 @@ export default function Registration({ token }) {
         tiene_familiares_caracas: hasFamilyCaracas,
         detalles_familiares_caracas: familyCaracasDetails,
         visitas_autorizadas: authorizedVisitors,
-        escolarizado: calculatedAge < 18 ? escolarizado : undefined,
-        centro_educativo: calculatedAge < 18 ? centroEducativo : undefined,
-        grado_cursado: calculatedAge < 18 ? gradoCursado : undefined,
+        escolarizado: isMinor ? escolarizado : undefined,
+        centro_educativo: isMinor ? centroEducativo : undefined,
+        grado_cursado: isMinor ? gradoCursado : undefined,
         empleo: {
           tiene_empleo: hasJob,
           empresa: jobCompany,
@@ -457,10 +470,8 @@ export default function Registration({ token }) {
       });
 
       if (!resHead.ok) {
-        const errorData = await resHead.json();
-        setError(errorData.error || 'Error al registrar al cabeza de familia.');
-        setLoading(false);
-        return;
+        const errorData = await resHead.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Error al registrar al residente principal.');
       }
 
       const headData = await resHead.json();
@@ -639,7 +650,7 @@ export default function Registration({ token }) {
 
     } catch (err) {
       console.error(err);
-      setError('Ocurrió un error al guardar el registro.');
+      setError(err.message || 'Ocurrió un error al guardar el registro.');
     } finally {
       setLoading(false);
     }
@@ -758,15 +769,17 @@ export default function Registration({ token }) {
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-on-surface-variant block mb-1">Número de Cédula / Documento *</label>
+                  <label className="text-xs font-bold text-on-surface-variant block mb-1">
+                    Número de Cédula / Documento {isMinor ? '(Opcional para menores)' : '*'}
+                  </label>
                   <input 
                     type="text" 
                     value={docId}
                     onChange={(e) => setDocId(e.target.value)}
                     placeholder="Ej. 12345678"
                     className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    required
                   />
+                  <p className="mt-1 text-[9px] text-on-surface-variant">Si el menor no posee cédula, deje este campo vacío e indique su fecha de nacimiento.</p>
                 </div>
 
                 <div>
@@ -795,11 +808,11 @@ export default function Registration({ token }) {
                 <div>
                   <label className="text-xs font-bold text-on-surface-variant block mb-1">Edad (Auto-calculada)</label>
                   <div className="w-full bg-surface-container border border-outline-variant rounded-lg p-3 text-xs font-bold text-primary">
-                    {calculatedAge}
+                    {calculatedAge === null ? '--' : `${calculatedAge} Años`}
                   </div>
                 </div>
 
-                {calculatedAge < 18 && (
+                {isMinor && (
                   <div className="md:col-span-2 border border-outline-variant p-4 rounded-xl bg-surface-container/20 grid grid-cols-1 md:grid-cols-3 gap-4 animate-in fade-in duration-200">
                     <div>
                       <label className="text-xs font-bold text-on-surface-variant block mb-1">¿Está Escolarizado?</label>
