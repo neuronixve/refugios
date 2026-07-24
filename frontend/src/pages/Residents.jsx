@@ -293,26 +293,16 @@ export default function Residents({ token }) {
     if (!window.confirm(`¿Corregir a ${resident.first_name} ${resident.last_name} como cabeza de familia?`)) return;
     setError('');
     try {
-      let familyGroupId = resident.family_group_id;
-      if (!familyGroupId) {
-        const familyResponse = await fetch(`${API_BASE}/family-groups`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ family_name: `Familia de ${resident.first_name} ${resident.last_name} (C.I. ${resident.document_id || 'S/C'})`, block_assignment: 'Por asignar' })
-        });
-        if (!familyResponse.ok) throw new Error('No se pudo crear el grupo familiar.');
-        familyGroupId = (await familyResponse.json()).id;
-      }
-      let metadata = {};
-      try { metadata = JSON.parse(resident.special_needs || '{}'); } catch { metadata = {}; }
-      const response = await updateResident(resident, {
-        status: 'Activo', family_group_id: familyGroupId,
-        special_needs: JSON.stringify({ ...metadata, es_cabeza_familia: true, parentesco: undefined })
+      const response = await fetch(`${API_BASE}/damnificados/${resident.id}/promote-head`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ refugio_id: parseInt(refugioId) })
       });
-      if (!response.ok) throw new Error('No se pudo actualizar la ficha.');
-      setMessage('Corrección realizada: la residente quedó activa y como cabeza de familia. Su grupo ya aparecerá al registrar a la hija.');
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'No se pudo crear o actualizar el grupo familiar.');
+      setMessage(data.message || 'La residente quedó activa y como cabeza de familia.');
       setShowRetired(false);
-      fetchResidentsAndBeds();
+      await fetchResidentsAndBeds();
     } catch (err) {
       setError(err.message || 'No fue posible corregir el grupo familiar.');
     }

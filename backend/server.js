@@ -834,6 +834,122 @@ app.post('/api/family-groups/merge', authenticateToken, async (req, res) => {
 
 // --- RUTAS DE DAMNIFICADOS ---
 
+// Convertir de forma atómica a un residente en cabeza de familia
+app.put('/api/damnificados/:id/promote-head', authenticateToken, async (req, res) => {
+  const residentId = parseInt(req.params.id);
+  const refugioId = parseInt(req.body.refugio_id);
+  if (!residentId || !refugioId) {
+    return res.status(400).json({ error: 'Residente y sede son requeridos.' });
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const residentResult = await client.query(
+      `SELECT id, document_id, first_name, last_name, family_group_id, special_needs, status
+       FROM damnificados
+       WHERE id = $1 AND refugio_id = $2
+       FOR UPDATE`,
+      [residentId, refugioId]
+    );
+    if (residentResult.rows.length === 0) {
+      throw Object.assign(new Error('La residente no existe en esta sede.'), { status: 404 });
+    }
+
+    const resident = residentResult.rows[0];
+    if (resident.status !== 'Activo') {
+      throw Object.assign(new Error('Debe reactivar a la residente antes de convertirla en cabeza de familia.'), { status: 409 });
+    }
+
+    let familyGroupId = resident.family_group_id;
+    let familyName = '';
+
+    if (!familyGroupId) {
+      const baseFamilyName = `Familia de ${resident.first_name} ${resident.last_name} (C.I. ${resident.document_id || 'S/C'})`;
+      const duplicateResult = await client.query(
+        `SELECT fg.id, fg.family_name,
+                (SELECT COUNT(*)::int FROM damnificados d WHERE d.family_group_id = fg.id) AS member_count
+         FROM family_groups fg
+         WHERE LOWER(TRIM(fg.family_name)) = LOWER(TRIM($1))
+         LIMIT 1
+         FOR UPDATE`,
+        [baseFamilyName]
+      );
+
+      if (duplicateResult.rows.length > 0 && duplicateResult.rows[0].member_count === 0) {
+        familyGroupId = duplicateResult.rows[0].id;
+        familyName = duplicateResult.rows[0].family_name;
+      } else {
+        familyName = duplicateResult.rows.length > 0
+          ? `${baseFamilyName} - Registro ${resident.id}`
+          : baseFamilyName;
+        const familyResult = await client.query(
+          `INSERT INTO family_groups (family_name, block_assignment)
+           VALUES ($1, $2)
+           RETURNING id, family_name`,
+          [familyName, 'Por asignar']
+        );
+        familyGroupId = familyResult.rows[0].id;
+        familyName = familyResult.rows[0].family_name;
+      }
+    } else {
+      const familyResult = await client.query(
+        'SELECT id, family_name FROM family_groups WHERE id = $1 FOR UPDATE',
+        [familyGroupId]
+      );
+      if (familyResult.rows.length === 0) {
+        throw Object.assign(new Error('El grupo familiar asociado ya no existe.'), { status: 404 });
+      }
+      familyName = familyResult.rows[0].family_name;
+
+      const otherMembers = await client.query(
+        'SELECT id, special_needs FROM damnificados WHERE family_group_id = $1 AND id <> $2 FOR UPDATE',
+        [familyGroupId, residentId]
+      );
+      for (const member of otherMembers.rows) {
+        const memberMetadata = parseMetadata(member.special_needs);
+        if (memberMetadata && typeof memberMetadata === 'object' && memberMetadata.es_cabeza_familia === true) {
+          memberMetadata.es_cabeza_familia = false;
+          memberMetadata.parentesco = memberMetadata.parentesco || 'Familiar';
+          await client.query(
+            'UPDATE damnificados SET special_needs = $1 WHERE id = $2',
+            [JSON.stringify(memberMetadata), member.id]
+          );
+        }
+      }
+    }
+
+    const parsedMetadata = parseMetadata(resident.special_needs);
+    const metadata = parsedMetadata && typeof parsedMetadata === 'object' && !Array.isArray(parsedMetadata)
+      ? parsedMetadata
+      : {};
+    metadata.es_cabeza_familia = true;
+    delete metadata.parentesco;
+
+    const updated = await client.query(
+      `UPDATE damnificados
+       SET family_group_id = $1, special_needs = $2
+       WHERE id = $3
+       RETURNING *`,
+      [familyGroupId, JSON.stringify(metadata), residentId]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      ...updated.rows[0],
+      family_name: familyName,
+      message: `${resident.first_name} ${resident.last_name} quedó registrada como cabeza de familia.`
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error al convertir residente en cabeza de familia:', err);
+    res.status(err.status || 500).json({ error: err.message || 'No se pudo crear o actualizar el grupo familiar.' });
+  } finally {
+    client.release();
+  }
+});
+
 // Obtener damnificados
 app.get('/api/damnificados', authenticateToken, async (req, res) => {
   const { refugio_id, search, family_group_id } = req.query;
