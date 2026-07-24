@@ -863,12 +863,12 @@ app.get('/api/damnificados', authenticateToken, async (req, res) => {
     if (search) {
       const parsedSearchId = parseInt(search);
       if (!isNaN(parsedSearchId)) {
-        queryText += ` AND (d.id = $${paramIndex} OR d.first_name ILIKE $${paramIndex + 1} OR d.last_name ILIKE $${paramIndex + 1} OR d.document_id ILIKE $${paramIndex + 1})`;
+        queryText += ` AND (d.id = $${paramIndex} OR CONCAT_WS(' ', d.first_name, d.last_name) ILIKE $${paramIndex + 1} OR d.document_id ILIKE $${paramIndex + 1})`;
         params.push(parsedSearchId);
         params.push(`%${search}%`);
         paramIndex += 2;
       } else {
-        queryText += ` AND (d.first_name ILIKE $${paramIndex} OR d.last_name ILIKE $${paramIndex} OR d.document_id ILIKE $${paramIndex})`;
+        queryText += ` AND (CONCAT_WS(' ', d.first_name, d.last_name) ILIKE $${paramIndex} OR d.document_id ILIKE $${paramIndex})`;
         params.push(`%${search}%`);
         paramIndex++;
       }
@@ -881,6 +881,88 @@ app.get('/api/damnificados', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al obtener damnificados.' });
+  }
+});
+
+// Vincular un residente ya registrado a un grupo familiar existente
+app.put('/api/damnificados/:id/family', authenticateToken, async (req, res) => {
+  const residentId = parseInt(req.params.id);
+  const familyGroupId = parseInt(req.body.family_group_id);
+  const refugioId = parseInt(req.body.refugio_id);
+  const parentesco = String(req.body.parentesco || '').trim();
+
+  if (!residentId || !familyGroupId || !refugioId || !parentesco) {
+    return res.status(400).json({ error: 'Residente, familia, sede y parentesco son requeridos.' });
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const familyResult = await client.query(
+      `SELECT fg.id, fg.family_name
+       FROM family_groups fg
+       WHERE fg.id = $1
+         AND EXISTS (
+           SELECT 1 FROM damnificados member
+           WHERE member.family_group_id = fg.id AND member.refugio_id = $2
+         )
+       FOR UPDATE`,
+      [familyGroupId, refugioId]
+    );
+    if (familyResult.rows.length === 0) {
+      throw Object.assign(new Error('La familia seleccionada no existe en esta sede.'), { status: 404 });
+    }
+
+    const residentResult = await client.query(
+      `SELECT id, first_name, last_name, family_group_id, special_needs, status
+       FROM damnificados
+       WHERE id = $1 AND refugio_id = $2
+       FOR UPDATE`,
+      [residentId, refugioId]
+    );
+    if (residentResult.rows.length === 0) {
+      throw Object.assign(new Error('El residente no existe en esta sede.'), { status: 404 });
+    }
+
+    const resident = residentResult.rows[0];
+    if (resident.status !== 'Activo') {
+      throw Object.assign(new Error('Solo se pueden vincular residentes activos.'), { status: 409 });
+    }
+    if (resident.family_group_id === familyGroupId) {
+      throw Object.assign(new Error('El residente ya pertenece a esta familia.'), { status: 409 });
+    }
+    if (resident.family_group_id) {
+      throw Object.assign(new Error('El residente ya pertenece a otra familia. Use la opción de unificar familias para corregir ese caso.'), { status: 409 });
+    }
+
+    const parsedMetadata = parseMetadata(resident.special_needs);
+    const metadata = parsedMetadata && typeof parsedMetadata === 'object' && !Array.isArray(parsedMetadata)
+      ? parsedMetadata
+      : {};
+    metadata.es_cabeza_familia = false;
+    metadata.parentesco = parentesco;
+
+    const updated = await client.query(
+      `UPDATE damnificados
+       SET family_group_id = $1, special_needs = $2
+       WHERE id = $3
+       RETURNING *`,
+      [familyGroupId, JSON.stringify(metadata), residentId]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      ...updated.rows[0],
+      family_name: familyResult.rows[0].family_name,
+      message: `${resident.first_name} ${resident.last_name} fue vinculado a la familia correctamente.`
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(err.status || 500).json({ error: err.message || 'No se pudo vincular el residente a la familia.' });
+  } finally {
+    client.release();
   }
 });
 

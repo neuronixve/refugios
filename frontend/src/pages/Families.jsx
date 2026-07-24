@@ -16,6 +16,14 @@ export default function Families({ token }) {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [showExistingResidentLink, setShowExistingResidentLink] = useState(false);
+  const [residentSearch, setResidentSearch] = useState('');
+  const [residentResults, setResidentResults] = useState([]);
+  const [searchingResidents, setSearchingResidents] = useState(false);
+  const [selectedResidentId, setSelectedResidentId] = useState('');
+  const [linkRelationship, setLinkRelationship] = useState('Esposa/o o pareja');
+  const [linkingResident, setLinkingResident] = useState(false);
+  const [linkFeedback, setLinkFeedback] = useState({ type: '', text: '' });
 
   const API_BASE = window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
@@ -51,6 +59,12 @@ export default function Families({ token }) {
     setMembers([]);
     setMergeTargetId('');
     setError('');
+    setShowExistingResidentLink(false);
+    setResidentSearch('');
+    setResidentResults([]);
+    setSelectedResidentId('');
+    setLinkRelationship('Esposa/o o pareja');
+    setLinkFeedback({ type: '', text: '' });
     try {
       const response = await fetch(`${API_BASE}/damnificados?family_group_id=${family.id}&refugio_id=${refugioId}`, { headers: authHeaders });
       if (!response.ok) throw new Error('No se pudieron cargar los integrantes de la familia.');
@@ -95,6 +109,76 @@ export default function Families({ token }) {
   const addMemberToSelectedFamily = () => {
     if (!selectedFamily?.id) return;
     navigate(`/refugio/${refugioId}/registro?family_group_id=${selectedFamily.id}`);
+  };
+
+  const searchExistingResidents = async (event) => {
+    event.preventDefault();
+    const query = residentSearch.trim();
+    if (query.length < 2) {
+      setLinkFeedback({ type: 'error', text: 'Ingrese al menos 2 caracteres del nombre o la cédula.' });
+      return;
+    }
+
+    setSearchingResidents(true);
+    setSelectedResidentId('');
+    setLinkFeedback({ type: '', text: '' });
+    try {
+      const params = new URLSearchParams({ refugio_id: refugioId, search: query });
+      const response = await fetch(`${API_BASE}/damnificados?${params.toString()}`, { headers: authHeaders });
+      if (!response.ok) throw new Error('No se pudo buscar residentes.');
+      const data = await response.json();
+      const results = data
+        .filter(resident => resident.status === 'Activo' && resident.family_group_id !== selectedFamily.id)
+        .slice(0, 20);
+      setResidentResults(results);
+      if (results.length === 0) {
+        setLinkFeedback({ type: 'info', text: 'No se encontraron residentes activos con ese nombre o cédula.' });
+      }
+    } catch (err) {
+      setLinkFeedback({ type: 'error', text: err.message });
+    } finally {
+      setSearchingResidents(false);
+    }
+  };
+
+  const linkExistingResident = async () => {
+    const resident = residentResults.find(item => String(item.id) === String(selectedResidentId));
+    if (!resident) {
+      setLinkFeedback({ type: 'error', text: 'Seleccione un residente sin grupo familiar.' });
+      return;
+    }
+    if (resident.family_group_id) {
+      setLinkFeedback({ type: 'error', text: 'Este residente ya pertenece a otra familia y no puede moverse desde este procedimiento.' });
+      return;
+    }
+    if (!window.confirm(`¿Vincular a ${resident.first_name} ${resident.last_name} con "${selectedFamily.family_name}" como ${linkRelationship}?`)) return;
+
+    setLinkingResident(true);
+    setLinkFeedback({ type: '', text: '' });
+    try {
+      const response = await fetch(`${API_BASE}/damnificados/${resident.id}/family`, {
+        method: 'PUT',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          family_group_id: selectedFamily.id,
+          refugio_id: parseInt(refugioId),
+          parentesco: linkRelationship
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'No se pudo vincular el residente.');
+
+      setMembers(current => [...current, data]);
+      setResidentResults(current => current.filter(item => item.id !== resident.id));
+      setSelectedResidentId('');
+      setResidentSearch('');
+      setLinkFeedback({ type: 'success', text: data.message || 'Residente vinculado correctamente.' });
+      await fetchFamilies();
+    } catch (err) {
+      setLinkFeedback({ type: 'error', text: err.message });
+    } finally {
+      setLinkingResident(false);
+    }
   };
 
   const familyPets = useMemo(() => members.flatMap(resident => {
@@ -235,20 +319,117 @@ export default function Families({ token }) {
                 <button disabled={saving} onClick={saveFamily} className="px-4 py-2.5 bg-primary text-on-primary rounded-lg text-xs font-bold disabled:opacity-50">{saving ? 'Guardando...' : 'Guardar cambios'}</button>
               </div>
               <div>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-3">
                   <div>
                     <h4 className="text-xs font-extrabold uppercase tracking-wide text-on-surface-variant">Integrantes ({members.length + familyPets.length})</h4>
                     {familyPets.length > 0 && <span className="text-[9px] font-bold text-on-surface-variant">{members.length} personas · {familyPets.length} {familyPets.length === 1 ? 'mascota' : 'mascotas'}</span>}
                   </div>
-                  <button
-                    type="button"
-                    onClick={addMemberToSelectedFamily}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-on-primary border border-primary rounded-lg text-xs font-extrabold shadow-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
-                  >
-                    <span className="material-symbols-outlined text-base">person_add</span>
-                    Añadir miembro a esta familia
-                  </button>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <button
+                      type="button"
+                      onClick={addMemberToSelectedFamily}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-surface text-primary border border-primary rounded-lg text-xs font-extrabold hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                    >
+                      <span className="material-symbols-outlined text-base">person_add</span>
+                      Registrar miembro nuevo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowExistingResidentLink(current => !current);
+                        setLinkFeedback({ type: '', text: '' });
+                      }}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-on-primary border border-primary rounded-lg text-xs font-extrabold shadow-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+                    >
+                      <span className="material-symbols-outlined text-base">person_search</span>
+                      Vincular residente existente
+                    </button>
+                  </div>
                 </div>
+                {showExistingResidentLink && (
+                  <div className="mb-4 p-4 rounded-xl border border-primary/25 bg-primary/5">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div>
+                        <h5 className="text-xs font-extrabold text-primary">Buscar residente registrado</h5>
+                        <p className="text-[10px] text-on-surface-variant mt-1">Busque por nombre completo o número de cédula. La ficha, cama e historial del residente se conservarán.</p>
+                      </div>
+                      <button type="button" onClick={() => setShowExistingResidentLink(false)} className="p-1 text-on-surface-variant hover:text-on-surface"><span className="material-symbols-outlined text-base">close</span></button>
+                    </div>
+
+                    <form onSubmit={searchExistingResidents} className="flex flex-col sm:flex-row gap-2">
+                      <div className="relative flex-1">
+                        <span className="material-symbols-outlined absolute left-3 top-2.5 text-base text-on-surface-variant">search</span>
+                        <input
+                          value={residentSearch}
+                          onChange={event => setResidentSearch(event.target.value)}
+                          placeholder="Ej. María Pérez o 12345678"
+                          className="w-full bg-surface border border-outline-variant rounded-lg pl-9 pr-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                      </div>
+                      <button type="submit" disabled={searchingResidents} className="px-4 py-2.5 bg-primary text-on-primary rounded-lg text-xs font-bold disabled:opacity-50">
+                        {searchingResidents ? 'Buscando...' : 'Buscar'}
+                      </button>
+                    </form>
+
+                    {residentResults.length > 0 && (
+                      <div className="mt-3 border border-outline-variant rounded-lg overflow-hidden bg-surface">
+                        {residentResults.map(resident => {
+                          const unavailable = Boolean(resident.family_group_id);
+                          return (
+                            <label key={resident.id} className={`p-3 border-b last:border-b-0 border-outline-variant flex items-center gap-3 ${unavailable ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-primary/5'}`}>
+                              <input
+                                type="radio"
+                                name="resident-to-link"
+                                value={resident.id}
+                                checked={String(selectedResidentId) === String(resident.id)}
+                                onChange={event => setSelectedResidentId(event.target.value)}
+                                disabled={unavailable}
+                                className="accent-primary"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-on-surface truncate">{resident.first_name} {resident.last_name}</p>
+                                <p className="text-[10px] text-on-surface-variant">C.I. {resident.document_id || 'N/T'} · {unavailable ? `Pertenece a ${resident.family_name || 'otra familia'}` : 'Sin grupo familiar'}</p>
+                              </div>
+                              <span className={`px-2 py-1 rounded-full text-[9px] font-bold ${unavailable ? 'bg-warning/15 text-warning' : 'bg-success/10 text-success'}`}>
+                                {unavailable ? 'No disponible' : 'Disponible'}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {selectedResidentId && (
+                      <div className="mt-3 flex flex-col sm:flex-row sm:items-end gap-2">
+                        <label className="flex-1 text-[10px] font-bold text-on-surface-variant">Parentesco dentro de esta familia
+                          <select value={linkRelationship} onChange={event => setLinkRelationship(event.target.value)} className="mt-1 w-full bg-surface border border-outline-variant rounded-lg p-2.5 text-xs">
+                            <option value="Hija/o">Hija/o</option>
+                            <option value="Esposa/o o pareja">Esposa/o o pareja</option>
+                            <option value="Madre/Padre">Madre/Padre</option>
+                            <option value="Hermana/o">Hermana/o</option>
+                            <option value="Nieta/o">Nieta/o</option>
+                            <option value="Otro familiar">Otro familiar</option>
+                          </select>
+                        </label>
+                        <button type="button" onClick={linkExistingResident} disabled={linkingResident} className="px-4 py-2.5 bg-success text-white rounded-lg text-xs font-extrabold disabled:opacity-50">
+                          {linkingResident ? 'Vinculando...' : 'Confirmar vínculo'}
+                        </button>
+                      </div>
+                    )}
+
+                    {linkFeedback.text && (
+                      <div className={`mt-3 p-3 rounded-lg text-[10px] font-semibold ${
+                        linkFeedback.type === 'error'
+                          ? 'bg-error-container/20 text-error border border-error/25'
+                          : linkFeedback.type === 'success'
+                            ? 'bg-success/10 text-success border border-success/20'
+                            : 'bg-surface-container text-on-surface-variant border border-outline-variant'
+                      }`}>
+                        {linkFeedback.text}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="border border-outline-variant rounded-xl overflow-hidden">
                   {members.map(resident => {
                     const metadata = getMetadata(resident);
