@@ -102,6 +102,7 @@ export default function Registration({ token }) {
   const [selectedFamilyId, setSelectedFamilyId] = useState('');
   const [existingFamilyRelationship, setExistingFamilyRelationship] = useState('Hija/o');
   const [familyMembers, setFamilyMembers] = useState([]);
+  const selectedExistingFamily = families.find(family => String(family.id) === String(selectedFamilyId));
 
   // --- STEP 3: MEDICAL & DYNAMIC SPACE ASSIGNMENT STATE ---
   // Expanded Chronic Illnesses (Head)
@@ -702,6 +703,19 @@ export default function Registration({ token }) {
                 <h3 className="text-md font-bold text-primary">Paso 1: Datos Personales</h3>
                 <p className="text-[10px] text-on-surface-variant">Ingrese la información de identificación y procedencia primaria.</p>
               </div>
+
+              {familyOption === 'existing' && selectedFamilyId && (
+                <div className="flex items-start gap-3 p-4 rounded-xl border border-primary/25 bg-primary/5">
+                  <div className="w-9 h-9 rounded-lg bg-primary text-on-primary flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-lg">family_restroom</span>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-primary">Nuevo integrante para esta familia</p>
+                    <p className="text-xs font-bold text-on-surface mt-0.5">{selectedExistingFamily?.family_name || 'Familia seleccionada'}</p>
+                    <p className="text-[9px] text-on-surface-variant mt-1">El grupo ya está preseleccionado y se confirmará en el paso 2.</p>
+                  </div>
+                </div>
+              )}
 
               {/* Photo upload header */}
               <div className="flex items-center gap-4 bg-surface p-4 rounded-xl border border-outline-variant">

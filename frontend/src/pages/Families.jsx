@@ -92,6 +92,11 @@ export default function Families({ token }) {
     try { return JSON.parse(resident.special_needs || '{}'); } catch { return {}; }
   };
 
+  const addMemberToSelectedFamily = () => {
+    if (!selectedFamily?.id) return;
+    navigate(`/refugio/${refugioId}/registro?family_group_id=${selectedFamily.id}`);
+  };
+
   const familyPets = useMemo(() => members.flatMap(resident => {
     const pet = getMetadata(resident).mascotas;
     if (pet?.tiene_mascotas !== 'Sí') return [];
@@ -219,7 +224,7 @@ export default function Families({ token }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-surface rounded-2xl border border-outline-variant w-full max-w-3xl shadow-lg max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-outline-variant flex justify-between items-start gap-4">
-              <div><h3 className="text-lg font-extrabold text-primary">Editar familia</h3><p className="text-[10px] text-on-surface-variant">Puede corregir el nombre y revisar todos sus integrantes.</p></div>
+              <div><h3 className="text-lg font-extrabold text-primary">Editar familia</h3><p className="text-[10px] text-on-surface-variant">Puede corregir el nombre, revisar sus integrantes y registrar miembros que lleguen posteriormente.</p></div>
               <button onClick={() => setSelectedFamily(null)} className="p-2 rounded-full hover:bg-surface-container"><span className="material-symbols-outlined">close</span></button>
             </div>
             <div className="p-6 flex flex-col gap-6">
@@ -228,12 +233,21 @@ export default function Families({ token }) {
                   <input value={editingName} onChange={(event) => setEditingName(event.target.value)} className="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-lg px-3 py-2.5 text-xs" />
                 </label>
                 <button disabled={saving} onClick={saveFamily} className="px-4 py-2.5 bg-primary text-on-primary rounded-lg text-xs font-bold disabled:opacity-50">{saving ? 'Guardando...' : 'Guardar cambios'}</button>
-                <button onClick={() => navigate(`/refugio/${refugioId}/registro?family_group_id=${selectedFamily.id}`)} className="px-4 py-2.5 bg-success text-white rounded-lg text-xs font-bold">Añadir miembro</button>
               </div>
               <div>
-                <div className="flex items-end justify-between gap-3 mb-3">
-                  <h4 className="text-xs font-extrabold uppercase tracking-wide text-on-surface-variant">Integrantes ({members.length + familyPets.length})</h4>
-                  {familyPets.length > 0 && <span className="text-[9px] font-bold text-on-surface-variant">{members.length} personas · {familyPets.length} {familyPets.length === 1 ? 'mascota' : 'mascotas'}</span>}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+                  <div>
+                    <h4 className="text-xs font-extrabold uppercase tracking-wide text-on-surface-variant">Integrantes ({members.length + familyPets.length})</h4>
+                    {familyPets.length > 0 && <span className="text-[9px] font-bold text-on-surface-variant">{members.length} personas · {familyPets.length} {familyPets.length === 1 ? 'mascota' : 'mascotas'}</span>}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addMemberToSelectedFamily}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-on-primary border border-primary rounded-lg text-xs font-extrabold shadow-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+                  >
+                    <span className="material-symbols-outlined text-base">person_add</span>
+                    Añadir miembro a esta familia
+                  </button>
                 </div>
                 <div className="border border-outline-variant rounded-xl overflow-hidden">
                   {members.map(resident => {
