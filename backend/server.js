@@ -850,7 +850,7 @@ app.put('/api/damnificados/:id/promote-head', authenticateToken, async (req, res
     return res.status(400).json({ error: 'Residente y sede son requeridos.' });
   }
 
-  const client = await db.connect();
+  const client = await db.pool.connect();
   try {
     await client.query('BEGIN');
 
@@ -1026,7 +1026,7 @@ app.put('/api/damnificados/:id/family', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Residente, familia, sede y parentesco son requeridos.' });
   }
 
-  const client = await db.connect();
+  const client = await db.pool.connect();
   try {
     await client.query('BEGIN');
 
