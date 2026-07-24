@@ -128,11 +128,32 @@ export default function Families({ token }) {
       if (!response.ok) throw new Error('No se pudo buscar residentes.');
       const data = await response.json();
       const results = data
-        .filter(resident => resident.status === 'Activo' && resident.family_group_id !== selectedFamily.id)
+        .filter(resident => String(resident.status || 'Activo').trim().toLowerCase() === 'activo' && resident.family_group_id !== selectedFamily.id)
         .slice(0, 20);
       setResidentResults(results);
       if (results.length === 0) {
         setLinkFeedback({ type: 'info', text: 'No se encontraron residentes activos con ese nombre o cédula.' });
+      }
+    } catch (err) {
+      setLinkFeedback({ type: 'error', text: err.message });
+    } finally {
+      setSearchingResidents(false);
+    }
+  };
+
+  const loadUnassignedMinors = async () => {
+    setSearchingResidents(true);
+    setSelectedResidentId('');
+    setResidentSearch('');
+    setLinkFeedback({ type: '', text: '' });
+    try {
+      const params = new URLSearchParams({ refugio_id: refugioId, minors_without_document: 'true' });
+      const response = await fetch(`${API_BASE}/damnificados?${params.toString()}`, { headers: authHeaders });
+      if (!response.ok) throw new Error('No se pudieron cargar los menores sin cédula.');
+      const data = await response.json();
+      setResidentResults(data.slice(0, 50));
+      if (data.length === 0) {
+        setLinkFeedback({ type: 'info', text: 'No hay menores sin cédula pendientes de vincular en esta sede.' });
       }
     } catch (err) {
       setLinkFeedback({ type: 'error', text: err.message });
@@ -370,6 +391,15 @@ export default function Families({ token }) {
                         {searchingResidents ? 'Buscando...' : 'Buscar'}
                       </button>
                     </form>
+                    <button
+                      type="button"
+                      onClick={loadUnassignedMinors}
+                      disabled={searchingResidents}
+                      className="mt-2 inline-flex items-center gap-1.5 px-3 py-2 border border-primary text-primary bg-surface rounded-lg text-[10px] font-bold hover:bg-primary/5 disabled:opacity-50"
+                    >
+                      <span className="material-symbols-outlined text-sm">child_care</span>
+                      Ver menores sin cédula y sin familia
+                    </button>
 
                     {residentResults.length > 0 && (
                       <div className="mt-3 border border-outline-variant rounded-lg overflow-hidden bg-surface">

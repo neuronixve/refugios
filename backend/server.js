@@ -11,6 +11,14 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
+const normalizeResidentDocumentId = value => {
+  const documentId = String(value || '').trim();
+  if (!documentId) return null;
+  const normalized = documentId.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const placeholders = ['nt', 'sc', 'sinc', 'sindocumento', 'sincedula', 'nocedula', 'nottiene'];
+  return placeholders.includes(normalized) ? null : documentId;
+};
+
 app.use(cors({
   origin: ['https://venezuelarenacera.com', 'http://localhost:5173'], // Tu web en producción y local
   credentials: true
@@ -858,7 +866,7 @@ app.put('/api/damnificados/:id/promote-head', authenticateToken, async (req, res
     }
 
     const resident = residentResult.rows[0];
-    if (resident.status !== 'Activo') {
+    if (String(resident.status || 'Activo').trim().toLowerCase() !== 'activo') {
       throw Object.assign(new Error('Debe reactivar a la residente antes de convertirla en cabeza de familia.'), { status: 409 });
     }
 
@@ -952,7 +960,7 @@ app.put('/api/damnificados/:id/promote-head', authenticateToken, async (req, res
 
 // Obtener damnificados
 app.get('/api/damnificados', authenticateToken, async (req, res) => {
-  const { refugio_id, search, family_group_id } = req.query;
+  const { refugio_id, search, family_group_id, minors_without_document } = req.query;
   try {
     let queryText = `
       SELECT d.*, r.name as refugio_name, fg.family_name 
@@ -974,6 +982,13 @@ app.get('/api/damnificados', authenticateToken, async (req, res) => {
       queryText += ` AND d.family_group_id = $${paramIndex}`;
       params.push(family_group_id);
       paramIndex++;
+    }
+
+    if (minors_without_document === 'true') {
+      queryText += ` AND d.family_group_id IS NULL
+                     AND (d.document_id IS NULL OR BTRIM(d.document_id) = '')
+                     AND (d.birth_date IS NULL OR d.birth_date > CURRENT_DATE - INTERVAL '18 years')
+                     AND LOWER(TRIM(COALESCE(d.status, 'Activo'))) = 'activo'`;
     }
 
     if (search) {
@@ -1042,7 +1057,7 @@ app.put('/api/damnificados/:id/family', authenticateToken, async (req, res) => {
     }
 
     const resident = residentResult.rows[0];
-    if (resident.status !== 'Activo') {
+    if (String(resident.status || 'Activo').trim().toLowerCase() !== 'activo') {
       throw Object.assign(new Error('Solo se pueden vincular residentes activos.'), { status: 409 });
     }
     if (resident.family_group_id === familyGroupId) {
@@ -1108,7 +1123,7 @@ app.post('/api/damnificados', authenticateToken, async (req, res) => {
       `INSERT INTO damnificados 
       (document_id, first_name, last_name, birth_date, gender, health_status, special_needs, refugio_id, family_group_id) 
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [document_id || null, first_name, last_name, birth_date || null, gender || null, health_status || 'Estable', special_needs || null, refugio_id || null, family_group_id || null]
+      [normalizeResidentDocumentId(document_id), first_name, last_name, birth_date || null, gender || null, health_status || 'Estable', special_needs || null, refugio_id || null, family_group_id || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1146,7 +1161,7 @@ app.put('/api/damnificados/:id', authenticateToken, async (req, res) => {
         gender = $5, health_status = $6, special_needs = $7, refugio_id = $8,
         family_group_id = $9, status = $10
       WHERE id = $11 RETURNING *`,
-      [document_id || null, first_name, last_name, birth_date || null, gender || null, health_status || 'Estable', special_needs || null, refugio_id || null, family_group_id || null, status || 'Activo', id]
+      [normalizeResidentDocumentId(document_id), first_name, last_name, birth_date || null, gender || null, health_status || 'Estable', special_needs || null, refugio_id || null, family_group_id || null, status || 'Activo', id]
     );
 
     if (result.rows.length === 0) {

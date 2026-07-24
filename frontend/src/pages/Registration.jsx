@@ -552,6 +552,9 @@ export default function Registration({ token }) {
                 body: JSON.stringify({ resident_id: memberData.id })
               });
             }
+          } else {
+            const memberError = await resMember.json().catch(() => ({}));
+            throw new Error(memberError.error || `No se pudo registrar a ${m.name || `Familiar #${i + 1}`}.`);
           }
         }
       }

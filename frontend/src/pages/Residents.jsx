@@ -43,6 +43,7 @@ export default function Residents({ token }) {
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showRetired, setShowRetired] = useState(false);
+  const [showWithoutDocument, setShowWithoutDocument] = useState(false);
   
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -190,7 +191,10 @@ export default function Residents({ token }) {
   };
 
   const filteredResidents = residents.filter(res => {
-    if (showRetired ? res.status === 'Activo' : res.status !== 'Activo') return false;
+    const normalizedStatus = String(res.status || 'Activo').trim().toLowerCase();
+    const isActive = normalizedStatus === 'activo';
+    if (showRetired ? isActive : !isActive) return false;
+    if (showWithoutDocument && String(res.document_id || '').trim() !== '') return false;
     const fullName = `${res.first_name} ${res.last_name}`.toLowerCase();
     const doc = (res.document_id || '').toLowerCase();
     const query = searchQuery.toLowerCase();
@@ -659,7 +663,15 @@ export default function Residents({ token }) {
         </div>
 
         <div className="flex items-center gap-3 text-xs">
-          <button onClick={() => { setShowRetired(!showRetired); setCurrentPage(1); }} className="px-3 py-2 border border-outline-variant rounded-lg font-bold text-primary">
+          {!showRetired && (
+            <button
+              onClick={() => { setShowWithoutDocument(current => !current); setCurrentPage(1); }}
+              className={`px-3 py-2 border rounded-lg font-bold ${showWithoutDocument ? 'bg-primary text-on-primary border-primary' : 'border-outline-variant text-primary'}`}
+            >
+              {showWithoutDocument ? 'Mostrar todos' : 'Sin cédula'}
+            </button>
+          )}
+          <button onClick={() => { setShowRetired(!showRetired); setShowWithoutDocument(false); setCurrentPage(1); }} className="px-3 py-2 border border-outline-variant rounded-lg font-bold text-primary">
             {showRetired ? 'Ver residentes activos' : 'Recuperar egresados'}
           </button>
           <span className="text-on-surface-variant font-semibold">Mostrar:</span>
