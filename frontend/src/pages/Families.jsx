@@ -441,7 +441,7 @@ export default function Families({ token }) {
                             <option value="Otro familiar">Otro familiar</option>
                           </select>
                         </label>
-                        <button type="button" onClick={linkExistingResident} disabled={linkingResident} className="px-4 py-2.5 bg-success text-white rounded-lg text-xs font-extrabold disabled:opacity-50">
+                        <button type="button" onClick={linkExistingResident} disabled={linkingResident} className="px-4 py-2.5 bg-primary text-on-primary border border-primary rounded-lg text-xs font-extrabold shadow-sm hover:opacity-90 disabled:opacity-50">
                           {linkingResident ? 'Vinculando...' : 'Confirmar vínculo'}
                         </button>
                       </div>
