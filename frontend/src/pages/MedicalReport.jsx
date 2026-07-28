@@ -12,9 +12,9 @@ export default function MedicalReport({ token }) {
   const [showEpidemiologicalModal, setShowEpidemiologicalModal] = useState(false);
   const [epiSearchQuery, setEpiSearchQuery] = useState('');
 
-  const API_BASE = window.location.hostname === 'localhost'
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
+    : 'https://api.venezuelarenacera.com/api');
 
   useEffect(() => {
     fetchData();

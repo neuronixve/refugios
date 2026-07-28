@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS family_groups (
     id SERIAL PRIMARY KEY,
     family_name VARCHAR(100) NOT NULL,
     block_assignment VARCHAR(50),
+    intake_data JSONB DEFAULT '{}'::jsonb,
+    registered_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_at TIMESTAMP DEFAULT NOW(),
     created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -51,6 +55,9 @@ CREATE TABLE IF NOT EXISTS damnificados (
     refugio_id INTEGER REFERENCES refugios(id) ON DELETE SET NULL,
     family_group_id INTEGER REFERENCES family_groups(id) ON DELETE SET NULL,
     status VARCHAR(20) DEFAULT 'Activo', -- 'Activo', 'Trasladado', 'Retirado'
+    registered_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_at TIMESTAMP DEFAULT NOW(),
     created_at TIMESTAMP DEFAULT NOW()
 );
 

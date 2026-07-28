@@ -27,9 +27,9 @@ export default function Donaciones({ token }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  const API_BASE = window.location.hostname === 'localhost'
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
+    : 'https://api.venezuelarenacera.com/api');
 
   useEffect(() => {
     fetchRecentDonations();

@@ -47,9 +47,9 @@ export default function PersonalList({ token }) {
   const [editPhotoLoading, setEditPhotoLoading] = useState(false);
   const [editPhotoLoaded, setEditPhotoLoaded] = useState(false);
 
-  const API_BASE = window.location.hostname === 'localhost'
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : '/api';
+    : '/api');
 
   const fetchStaff = useCallback(async () => {
     setLoading(true);

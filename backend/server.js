@@ -20,7 +20,12 @@ const normalizeResidentDocumentId = value => {
 };
 
 app.use(cors({
-  origin: ['https://venezuelarenacera.com', 'http://localhost:5173'], // Tu web en producción y local
+  origin: [
+    'https://venezuelarenacera.com',
+    'http://localhost:5173',
+    'http://localhost:5180',
+    process.env.LOCAL_FRONTEND_ORIGIN
+  ].filter(Boolean),
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -72,6 +77,13 @@ async function initDb() {
     await runMigration('menus.diets_json', "ALTER TABLE menus ADD COLUMN IF NOT EXISTS diets_json TEXT DEFAULT '{}'");
     await runMigration('warehouse_requests.details', 'ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS details TEXT');
     await runMigration('warehouse_requests.unit', "ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS unit VARCHAR(20) DEFAULT 'Unidades'");
+    await runMigration('family_groups.intake_data', "ALTER TABLE family_groups ADD COLUMN IF NOT EXISTS intake_data JSONB DEFAULT '{}'::jsonb");
+    await runMigration('family_groups.registered_by', 'ALTER TABLE family_groups ADD COLUMN IF NOT EXISTS registered_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
+    await runMigration('family_groups.updated_by', 'ALTER TABLE family_groups ADD COLUMN IF NOT EXISTS updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
+    await runMigration('family_groups.updated_at', 'ALTER TABLE family_groups ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()');
+    await runMigration('damnificados.registered_by', 'ALTER TABLE damnificados ADD COLUMN IF NOT EXISTS registered_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
+    await runMigration('damnificados.updated_by', 'ALTER TABLE damnificados ADD COLUMN IF NOT EXISTS updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
+    await runMigration('damnificados.updated_at', 'ALTER TABLE damnificados ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()');
     await db.query(`
       CREATE TABLE IF NOT EXISTS medication_deliveries (
         id SERIAL PRIMARY KEY,
@@ -666,6 +678,10 @@ app.get('/api/family-groups', authenticateToken, async (req, res) => {
     }
     const result = await db.query(`
       SELECT fg.*,
+             creator.name AS registered_by_name,
+             creator.document_id AS registered_by_document,
+             creator.staff_function AS registered_by_function,
+             updater.name AS updated_by_name,
              COUNT(d.id) FILTER (WHERE d.status = 'Activo')::int as members_count,
              COUNT(d.id)::int as total_members,
              COUNT(d.id) FILTER (
@@ -674,8 +690,10 @@ app.get('/api/family-groups', authenticateToken, async (req, res) => {
              )::int as pets_count
       FROM family_groups fg
       LEFT JOIN damnificados d ON fg.id = d.family_group_id
+      LEFT JOIN users creator ON creator.id = fg.registered_by
+      LEFT JOIN users updater ON updater.id = fg.updated_by
       ${scope}
-      GROUP BY fg.id
+      GROUP BY fg.id, creator.id, updater.id
       ORDER BY fg.family_name ASC
     `, params);
     res.json(result.rows);
@@ -742,7 +760,7 @@ app.get('/api/family-groups/export', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/family-groups', authenticateToken, async (req, res) => {
-  const { family_name, block_assignment } = req.body;
+  const { family_name, block_assignment, intake_data = {} } = req.body;
   if (!family_name) return res.status(400).json({ error: 'El nombre de la familia es requerido.' });
   try {
     const duplicate = await db.query('SELECT id, family_name FROM family_groups WHERE LOWER(TRIM(family_name)) = LOWER(TRIM($1)) LIMIT 1', [family_name]);
@@ -750,8 +768,9 @@ app.post('/api/family-groups', authenticateToken, async (req, res) => {
       return res.status(409).json({ error: 'Ya existe una familia con ese mismo nombre. Use la opción de unificar familias si se trata de un duplicado.', existing_family: duplicate.rows[0] });
     }
     const result = await db.query(
-      'INSERT INTO family_groups (family_name, block_assignment) VALUES ($1, $2) RETURNING *',
-      [family_name, block_assignment]
+      `INSERT INTO family_groups (family_name, block_assignment, intake_data, registered_by, updated_by)
+       VALUES ($1, $2, $3::jsonb, $4, $4) RETURNING *`,
+      [family_name, block_assignment, JSON.stringify(intake_data || {}), req.user?.id || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -762,7 +781,7 @@ app.post('/api/family-groups', authenticateToken, async (req, res) => {
 
 app.put('/api/family-groups/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { family_name, block_assignment } = req.body;
+  const { family_name, block_assignment, intake_data } = req.body;
   if (!family_name || !family_name.trim()) return res.status(400).json({ error: 'El nombre de la familia es requerido.' });
   try {
     const duplicate = await db.query(
@@ -773,8 +792,15 @@ app.put('/api/family-groups/:id', authenticateToken, async (req, res) => {
       return res.status(409).json({ error: 'Ya existe otra familia con ese mismo nombre. Unifique ambos grupos en lugar de renombrarlos igual.' });
     }
     const result = await db.query(
-      'UPDATE family_groups SET family_name = $1, block_assignment = $2 WHERE id = $3 RETURNING *',
-      [family_name.trim(), block_assignment || null, id]
+      `UPDATE family_groups
+       SET family_name = $1,
+           block_assignment = $2,
+           intake_data = COALESCE($3::jsonb, intake_data, '{}'::jsonb),
+           updated_by = $4,
+           updated_at = NOW()
+       WHERE id = $5
+       RETURNING *`,
+      [family_name.trim(), block_assignment || null, intake_data === undefined ? null : JSON.stringify(intake_data || {}), req.user?.id || null, id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Grupo familiar no encontrado.' });
     res.json(result.rows[0]);
@@ -824,9 +850,24 @@ app.post('/api/family-groups/merge', authenticateToken, async (req, res) => {
       }
     }
 
+    await client.query(
+      `UPDATE family_groups AS target
+       SET intake_data = CASE
+             WHEN target.intake_data IS NULL OR target.intake_data = '{}'::jsonb
+               THEN COALESCE(source.intake_data, '{}'::jsonb)
+             ELSE target.intake_data
+           END,
+           registered_by = COALESCE(target.registered_by, source.registered_by),
+           updated_by = $3,
+           updated_at = NOW()
+       FROM family_groups AS source
+       WHERE target.id = $1 AND source.id = $2`,
+      [targetId, sourceId, req.user?.id || null]
+    );
+
     const moved = await client.query(
-      'UPDATE damnificados SET family_group_id = $1 WHERE family_group_id = $2 AND refugio_id = $3 RETURNING id',
-      [targetId, sourceId, refugioId]
+      'UPDATE damnificados SET family_group_id = $1, updated_by = $4, updated_at = NOW() WHERE family_group_id = $2 AND refugio_id = $3 RETURNING id',
+      [targetId, sourceId, refugioId, req.user?.id || null]
     );
     await client.query('DELETE FROM family_groups WHERE id = $1', [sourceId]);
     await client.query('COMMIT');
@@ -888,15 +929,19 @@ app.put('/api/damnificados/:id/promote-head', authenticateToken, async (req, res
       if (duplicateResult.rows.length > 0 && duplicateResult.rows[0].member_count === 0) {
         familyGroupId = duplicateResult.rows[0].id;
         familyName = duplicateResult.rows[0].family_name;
+        await client.query(
+          'UPDATE family_groups SET registered_by = COALESCE(registered_by, $1), updated_by = $1, updated_at = NOW() WHERE id = $2',
+          [req.user?.id || null, familyGroupId]
+        );
       } else {
         familyName = duplicateResult.rows.length > 0
           ? `${baseFamilyName} - Registro ${resident.id}`
           : baseFamilyName;
         const familyResult = await client.query(
-          `INSERT INTO family_groups (family_name, block_assignment)
-           VALUES ($1, $2)
+          `INSERT INTO family_groups (family_name, block_assignment, registered_by, updated_by)
+           VALUES ($1, $2, $3, $3)
            RETURNING id, family_name`,
-          [familyName, 'Por asignar']
+          [familyName, 'Por asignar', req.user?.id || null]
         );
         familyGroupId = familyResult.rows[0].id;
         familyName = familyResult.rows[0].family_name;
@@ -963,10 +1008,14 @@ app.get('/api/damnificados', authenticateToken, async (req, res) => {
   const { refugio_id, search, family_group_id, minors_without_document } = req.query;
   try {
     let queryText = `
-      SELECT d.*, r.name as refugio_name, fg.family_name 
+      SELECT d.*, r.name as refugio_name, fg.family_name,
+             creator.name AS registered_by_name,
+             updater.name AS updated_by_name
       FROM damnificados d 
       LEFT JOIN refugios r ON d.refugio_id = r.id 
       LEFT JOIN family_groups fg ON d.family_group_id = fg.id
+      LEFT JOIN users creator ON creator.id = d.registered_by
+      LEFT JOIN users updater ON updater.id = d.updated_by
       WHERE 1=1
     `;
     const params = [];
@@ -1121,9 +1170,9 @@ app.post('/api/damnificados', authenticateToken, async (req, res) => {
 
     const result = await db.query(
       `INSERT INTO damnificados 
-      (document_id, first_name, last_name, birth_date, gender, health_status, special_needs, refugio_id, family_group_id) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [normalizeResidentDocumentId(document_id), first_name, last_name, birth_date || null, gender || null, health_status || 'Estable', special_needs || null, refugio_id || null, family_group_id || null]
+      (document_id, first_name, last_name, birth_date, gender, health_status, special_needs, refugio_id, family_group_id, registered_by, updated_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10) RETURNING *`,
+      [normalizeResidentDocumentId(document_id), first_name, last_name, birth_date || null, gender || null, health_status || 'Estable', special_needs || null, refugio_id || null, family_group_id || null, req.user?.id || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1159,9 +1208,9 @@ app.put('/api/damnificados/:id', authenticateToken, async (req, res) => {
       `UPDATE damnificados SET 
         document_id = $1, first_name = $2, last_name = $3, birth_date = $4, 
         gender = $5, health_status = $6, special_needs = $7, refugio_id = $8,
-        family_group_id = $9, status = $10
-      WHERE id = $11 RETURNING *`,
-      [normalizeResidentDocumentId(document_id), first_name, last_name, birth_date || null, gender || null, health_status || 'Estable', special_needs || null, refugio_id || null, family_group_id || null, status || 'Activo', id]
+        family_group_id = $9, status = $10, updated_by = $11, updated_at = NOW()
+      WHERE id = $12 RETURNING *`,
+      [normalizeResidentDocumentId(document_id), first_name, last_name, birth_date || null, gender || null, health_status || 'Estable', special_needs || null, refugio_id || null, family_group_id || null, status || 'Activo', req.user?.id || null, id]
     );
 
     if (result.rows.length === 0) {

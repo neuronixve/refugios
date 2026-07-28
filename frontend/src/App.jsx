@@ -91,9 +91,9 @@ const getDefaultPath = (user, refugioId) => {
 };
 
 export default function App() {
-  const API_BASE = window.location.hostname === 'localhost'
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
+    : 'https://api.venezuelarenacera.com/api');
 
   const [token, setToken] = useState(localStorage.getItem('token') || '');
   const [user, setUser] = useState(null);
@@ -187,7 +187,7 @@ export default function App() {
       <div className="min-h-screen bg-background flex flex-col justify-center items-center px-4">
         <div className="w-full max-w-md bg-surface-container-lowest border border-outline-variant p-8 rounded-2xl shadow-lg flex flex-col gap-6">
           <div className="text-center flex flex-col gap-2">
-            <img src="/logo-renacera.png" alt="Venezuela Renacerá Logo" className="h-28 object-contain mx-auto" />
+            <img src="/logo-saren.png" alt="Logo de SAREN" className="w-full max-w-[340px] h-auto object-contain mx-auto" />
             <p className="text-xs text-on-surface-variant font-medium mt-1">Sistema de Gestión y Coordinación Sanitaria de Campamentos Temporales</p>
           </div>
 

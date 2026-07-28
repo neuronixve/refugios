@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import FamilyIntakeForm from '../components/FamilyIntakeForm';
+import { normalizeFamilyIntake } from '../utils/familyIntakeData';
+import { printFamilyIntake } from '../utils/familyIntakePrint';
 
 export default function Families({ token }) {
   const { refugioId } = useParams();
@@ -16,6 +19,8 @@ export default function Families({ token }) {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [printingFamilyId, setPrintingFamilyId] = useState(null);
+  const [familyIntake, setFamilyIntake] = useState(() => normalizeFamilyIntake({}));
   const [showExistingResidentLink, setShowExistingResidentLink] = useState(false);
   const [residentSearch, setResidentSearch] = useState('');
   const [residentResults, setResidentResults] = useState([]);
@@ -25,9 +30,9 @@ export default function Families({ token }) {
   const [linkingResident, setLinkingResident] = useState(false);
   const [linkFeedback, setLinkFeedback] = useState({ type: '', text: '' });
 
-  const API_BASE = window.location.hostname === 'localhost'
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
+    : 'https://api.venezuelarenacera.com/api');
 
   const authHeaders = { Authorization: `Bearer ${token}` };
 
@@ -56,6 +61,7 @@ export default function Families({ token }) {
   const openFamily = async (family) => {
     setSelectedFamily(family);
     setEditingName(family.family_name);
+    setFamilyIntake(normalizeFamilyIntake(family.intake_data));
     setMembers([]);
     setMergeTargetId('');
     setError('');
@@ -85,14 +91,20 @@ export default function Families({ token }) {
       const response = await fetch(`${API_BASE}/family-groups/${selectedFamily.id}`, {
         method: 'PUT',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ family_name: editingName.trim(), block_assignment: selectedFamily.block_assignment })
+        body: JSON.stringify({
+          family_name: editingName.trim(),
+          block_assignment: selectedFamily.block_assignment,
+          intake_data: familyIntake
+        })
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.error || 'No se pudo actualizar la familia.');
       }
       const updated = await response.json();
-      setSelectedFamily({ ...selectedFamily, ...updated });
+      const nextFamily = { ...selectedFamily, ...updated, intake_data: familyIntake };
+      setSelectedFamily(nextFamily);
+      setFamilies(current => current.map(family => family.id === nextFamily.id ? nextFamily : family));
       setMessage('Datos de la familia actualizados correctamente.');
       await fetchFamilies();
     } catch (err) {
@@ -271,6 +283,36 @@ export default function Families({ token }) {
     }
   };
 
+  const printFamily = async (family, loadedMembers = null) => {
+    setPrintingFamilyId(family.id);
+    setError('');
+    try {
+      const [membersResponse, refugioResponse] = await Promise.all([
+        loadedMembers
+          ? Promise.resolve(null)
+          : fetch(`${API_BASE}/damnificados?family_group_id=${family.id}&refugio_id=${refugioId}`, { headers: authHeaders }),
+        fetch(`${API_BASE}/refugios/${refugioId}`, { headers: authHeaders })
+      ]);
+      if (membersResponse && !membersResponse.ok) throw new Error('No se pudieron cargar los integrantes para la planilla.');
+      if (!refugioResponse.ok) throw new Error('No se pudo cargar la información del campamento temporal.');
+      const reportMembers = loadedMembers || await membersResponse.json();
+      const refugio = await refugioResponse.json();
+      printFamilyIntake({
+        family: {
+          ...family,
+          family_name: family.id === selectedFamily?.id ? editingName : family.family_name,
+          intake_data: family.id === selectedFamily?.id ? familyIntake : family.intake_data
+        },
+        members: reportMembers,
+        refugio
+      });
+    } catch (err) {
+      setError(err.message || 'No se pudo generar la planilla familiar.');
+    } finally {
+      setPrintingFamilyId(null);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <header className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -316,9 +358,18 @@ export default function Families({ token }) {
               </div>
               <h3 className="mt-4 text-sm font-extrabold text-on-surface">{family.family_name}</h3>
               <p className="mt-1 text-[10px] text-on-surface-variant">Total histórico: {family.total_members} personas · {family.pets_count || 0} {(family.pets_count || 0) === 1 ? 'mascota' : 'mascotas'} · Espacio: {family.block_assignment || 'Sin asignar'}</p>
-              <div className="mt-5 flex gap-2">
-                <button onClick={() => openFamily(family)} className="flex-1 px-3 py-2 border border-primary text-primary rounded-lg text-[10px] font-bold">Ver y editar</button>
-                <button onClick={() => navigate(`/refugio/${refugioId}/registro?family_group_id=${family.id}`)} className="flex-1 px-3 py-2 bg-primary text-on-primary rounded-lg text-[10px] font-bold">Añadir miembro</button>
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <button onClick={() => openFamily(family)} className="px-3 py-2 border border-primary text-primary rounded-lg text-[10px] font-bold">Ver y editar</button>
+                <button onClick={() => navigate(`/refugio/${refugioId}/registro?family_group_id=${family.id}`)} className="px-3 py-2 bg-primary text-on-primary rounded-lg text-[10px] font-bold">Añadir miembro</button>
+                <button
+                  type="button"
+                  onClick={() => printFamily(family)}
+                  disabled={printingFamilyId === family.id}
+                  className="col-span-2 px-3 py-2 border border-primary bg-primary/5 text-primary rounded-lg text-[10px] font-extrabold inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-sm">print</span>
+                  {printingFamilyId === family.id ? 'Generando planilla...' : 'Generar e imprimir planilla'}
+                </button>
               </div>
             </article>
           ))}
@@ -330,7 +381,18 @@ export default function Families({ token }) {
           <div className="bg-surface rounded-2xl border border-outline-variant w-full max-w-3xl shadow-lg max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-outline-variant flex justify-between items-start gap-4">
               <div><h3 className="text-lg font-extrabold text-primary">Editar familia</h3><p className="text-[10px] text-on-surface-variant">Puede corregir el nombre, revisar sus integrantes y registrar miembros que lleguen posteriormente.</p></div>
-              <button onClick={() => setSelectedFamily(null)} className="p-2 rounded-full hover:bg-surface-container"><span className="material-symbols-outlined">close</span></button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => printFamily(selectedFamily, members)}
+                  disabled={printingFamilyId === selectedFamily.id}
+                  className="px-3 py-2 rounded-lg border border-primary text-primary text-[10px] font-bold inline-flex items-center gap-1 disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-sm">print</span>
+                  Imprimir planilla
+                </button>
+                <button onClick={() => setSelectedFamily(null)} className="p-2 rounded-full hover:bg-surface-container"><span className="material-symbols-outlined">close</span></button>
+              </div>
             </div>
             <div className="p-6 flex flex-col gap-6">
               <div className="flex flex-col md:flex-row gap-3 md:items-end">
@@ -338,6 +400,22 @@ export default function Families({ token }) {
                   <input value={editingName} onChange={(event) => setEditingName(event.target.value)} className="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-lg px-3 py-2.5 text-xs" />
                 </label>
                 <button disabled={saving} onClick={saveFamily} className="px-4 py-2.5 bg-primary text-on-primary rounded-lg text-xs font-bold disabled:opacity-50">{saving ? 'Guardando...' : 'Guardar cambios'}</button>
+              </div>
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+                <p className="text-[10px] font-extrabold uppercase tracking-wide text-primary">Responsable del registro</p>
+                <p className="mt-1 text-xs font-bold text-on-surface">{selectedFamily.registered_by_name || selectedFamily.updated_by_name || 'Se asignará al guardar o actualizar'}</p>
+                <p className="text-[10px] text-on-surface-variant">
+                  {selectedFamily.registered_by_document ? `C.I. ${selectedFamily.registered_by_document}` : 'Documento no registrado'}
+                  {' · '}
+                  {selectedFamily.registered_by_function || 'Función no indicada'}
+                </p>
+              </div>
+              <div>
+                <div className="mb-3">
+                  <h4 className="text-sm font-extrabold text-primary">Ficha integral del grupo familiar</h4>
+                  <p className="text-[10px] text-on-surface-variant">Complete estas secciones para que la planilla pueda generarse sin información pendiente.</p>
+                </div>
+                <FamilyIntakeForm value={familyIntake} onChange={setFamilyIntake} />
               </div>
               <div>
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-3">

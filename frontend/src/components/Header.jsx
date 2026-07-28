@@ -6,7 +6,7 @@ export default function Header({ user, selectedRefugio, onMenuClick }) {
 
   return (
     <header className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-4 md:px-container-margin-desktop bg-white border-b border-outline-variant h-20">
-      {/* Brand Logo (Venezuela Renacerá) */}
+      {/* Identidad institucional de SAREN */}
       <div className="flex items-center gap-3">
         {user && (
           <button
@@ -19,7 +19,11 @@ export default function Header({ user, selectedRefugio, onMenuClick }) {
           </button>
         )}
         <div className="flex items-center gap-4 cursor-pointer" onClick={() => navigate('/welcome')}>
-          <img src="/logo-renacera.png" alt="Logo Venezuela Renacerá" className="h-12 md:h-16 object-contain" />
+          <img
+            src="/banner-saren.png"
+            alt="Vicepresidencia de la República Bolivariana de Venezuela — Servicio Autónomo de Registros y Notarías"
+            className="w-36 sm:w-52 md:w-56 xl:w-80 h-auto object-contain"
+          />
         </div>
       </div>
 
@@ -37,9 +41,9 @@ export default function Header({ user, selectedRefugio, onMenuClick }) {
         )}
       </div>
 
-      {/* User Info, Actions & Ministry Logo */}
+      {/* Logo de SAREN, información del usuario y acciones */}
       <div className="flex items-center gap-4">
-        <img src="/logo-ministerio.png?v=20260715" alt="Ministerio del Poder Popular para Relaciones y Comercio Exterior" className="hidden md:block h-12 max-w-[240px] object-contain mr-2" />
+        <img src="/logo-saren.png" alt="Logo de SAREN" className="hidden md:block w-28 lg:w-36 xl:w-40 h-auto object-contain mr-2" />
         {user && (
           <div className="hidden sm:flex flex-col text-right">
             <span className="text-body-sm font-bold text-on-surface">{user.name}</span>

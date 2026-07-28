@@ -70,9 +70,9 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
   const [photoByUserId, setPhotoByUserId] = useState({});
   const loadingPhotoIds = useRef(new Set());
 
-  const API_BASE = window.location.hostname === 'localhost'
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : '/api';
+    : '/api');
 
   const staffFunctionOptions = Array.from(new Set([
     ...DEFAULT_STAFF_FUNCTIONS,

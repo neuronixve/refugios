@@ -38,9 +38,9 @@ export default function Dashboard({ token, selectedRefugio }) {
   const [petsCensus, setPetsCensus] = useState({ countWithPets: 0, list: [] });
   const [totalMinors, setTotalMinors] = useState(0);
 
-  const API_BASE = window.location.hostname === 'localhost'
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
+    : 'https://api.venezuelarenacera.com/api');
 
   useEffect(() => {
     if (refugioId) {

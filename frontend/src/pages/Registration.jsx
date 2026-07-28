@@ -74,6 +74,21 @@ export default function Registration({ token }) {
   // Demographics & Contact
   const [contactPhone, setContactPhone] = useState('');
   const [emergencyContact, setEmergencyContact] = useState('');
+  const [personIntake, setPersonIntake] = useState({
+    tipo_documento: 'C.I.',
+    estatus_documento: 'Por verificar',
+    telefono_alterno: '',
+    rol_familiar: 'Jefe(a) de hogar / representante',
+    red_apoyo_externa: 'Por verificar',
+    condicion_prioritaria: '',
+    requiere_evaluacion_medica: 'No',
+    requiere_refrigeracion: 'No',
+    embarazo_semanas: '',
+    lactancia_edad: '',
+    ayuda_tecnica: '',
+    apoyo_psicosocial: 'No requerido',
+    observaciones: ''
+  });
   const [minorChildrenUnderCharge, setMinorChildrenUnderCharge] = useState('');
   const [nutritionalRequirement, setNutritionalRequirement] = useState('Ninguno');
   
@@ -157,9 +172,9 @@ export default function Registration({ token }) {
   const [activeAssigneeIndex, setActiveAssigneeIndex] = useState('head');
   const [welcomeKit, setWelcomeKit] = useState(false);
 
-  const API_BASE = window.location.hostname === 'localhost'
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
+    : 'https://api.venezuelarenacera.com/api');
 
   useEffect(() => {
     fetchFamilies();
@@ -433,6 +448,7 @@ export default function Registration({ token }) {
         nutricion_especial: nutritionalRequirement,
         discapacidad: disabilityType,
         documento_perdido: lostDocumentation,
+        planilla_persona: personIntake,
         estado_vivienda: housingCondition,
         tenencia_vivienda: housingTenure,
         personas_a_cargo: parseInt(totalPeopleUnderCharge) || 0,
@@ -527,6 +543,21 @@ export default function Registration({ token }) {
             nutricion_especial: m.nutritionalRequirement,
             discapacidad: m.disabilityType,
             documento_perdido: m.lostDocumentation,
+            planilla_persona: {
+              tipo_documento: 'C.I.',
+              estatus_documento: m.lostDocumentation ? 'Perdido' : 'Por verificar',
+              telefono_alterno: m.emergencyContact || '',
+              rol_familiar: m.relation,
+              red_apoyo_externa: 'Por verificar',
+              condicion_prioritaria: m.specialNeeds || '',
+              requiere_evaluacion_medica: 'No',
+              requiere_refrigeracion: 'No',
+              embarazo_semanas: '',
+              lactancia_edad: '',
+              ayuda_tecnica: m.disabilityType && m.disabilityType !== 'Ninguna' ? m.disabilityType : '',
+              apoyo_psicosocial: 'No requerido',
+              observaciones: ''
+            },
             escolarizado: m.birthDate && (new Date().getFullYear() - new Date(m.birthDate).getFullYear()) < 18 ? m.escolarizado : undefined,
             centro_educativo: m.birthDate && (new Date().getFullYear() - new Date(m.birthDate).getFullYear()) < 18 ? m.centro_educativo : undefined,
             grado_cursado: m.birthDate && (new Date().getFullYear() - new Date(m.birthDate).getFullYear()) < 18 ? m.grado_cursado : undefined
@@ -783,6 +814,33 @@ export default function Registration({ token }) {
                 </div>
 
                 <div>
+                  <label className="text-xs font-bold text-on-surface-variant block mb-1">Tipo de documento</label>
+                  <select value={personIntake.tipo_documento} onChange={e => setPersonIntake(current => ({ ...current, tipo_documento: e.target.value }))} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs">
+                    <option value="C.I.">C.I.</option>
+                    <option value="Pasaporte">Pasaporte</option>
+                    <option value="Partida de nacimiento">Partida de nacimiento</option>
+                    <option value="Otro">Otro</option>
+                    <option value="Sin documento">Sin documento</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-on-surface-variant block mb-1">Estatus del documento físico</label>
+                  <select value={personIntake.estatus_documento} onChange={e => {
+                    const value = e.target.value;
+                    setPersonIntake(current => ({ ...current, estatus_documento: value }));
+                    setLostDocumentation(value === 'Perdido');
+                  }} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs">
+                    <option value="En mano">En mano</option>
+                    <option value="Perdido">Perdido</option>
+                    <option value="Dañado">Dañado</option>
+                    <option value="No porta">No porta</option>
+                    <option value="En trámite">En trámite</option>
+                    <option value="Por verificar">Por verificar</option>
+                  </select>
+                </div>
+
+                <div>
                   <label className="text-xs font-bold text-on-surface-variant block mb-1">Género</label>
                   <select 
                     value={gender}
@@ -875,6 +933,22 @@ export default function Registration({ token }) {
                         placeholder="Ej. María Gómez (Hermana) - 0416-1234567"
                         className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none"
                       />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-on-surface-variant block mb-1">Teléfono alterno</label>
+                      <input type="text" value={personIntake.telefono_alterno} onChange={e => setPersonIntake(current => ({ ...current, telefono_alterno: e.target.value }))} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-on-surface-variant block mb-1">Red de apoyo externa</label>
+                      <select value={personIntake.red_apoyo_externa} onChange={e => setPersonIntake(current => ({ ...current, red_apoyo_externa: e.target.value }))} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs">
+                        <option value="Sí">Sí</option>
+                        <option value="No">No</option>
+                        <option value="Por verificar">Por verificar</option>
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-xs font-bold text-on-surface-variant block mb-1">Condición prioritaria / observación para planilla</label>
+                      <input type="text" value={personIntake.condicion_prioritaria} onChange={e => setPersonIntake(current => ({ ...current, condicion_prioritaria: e.target.value }))} placeholder="Ej. adulto mayor solo, NNA sin documento..." className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none" />
                     </div>
                     <div>
                       <label className="text-xs font-bold text-on-surface-variant block mb-1">Menores de edad a cargo</label>

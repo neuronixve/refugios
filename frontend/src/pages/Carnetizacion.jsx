@@ -16,9 +16,9 @@ export default function Carnetizacion({ token, selectedRefugio }) {
   const [printFilter, setPrintFilter] = useState('pending'); // 'pending', 'printed', 'all'
   const [sortBy, setSortBy] = useState('sector'); // 'sector', 'name'
 
-  const API_BASE = window.location.hostname === 'localhost'
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
+    : 'https://api.venezuelarenacera.com/api');
 
   useEffect(() => {
     fetchData();
