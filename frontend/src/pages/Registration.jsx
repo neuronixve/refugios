@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import PriorityConditionSelector from '../components/PriorityConditionSelector';
 
@@ -48,6 +48,187 @@ const compressImage = (file) => {
   });
 };
 
+function CameraCaptureDialog({ onCapture, onClose }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const requestSequenceRef = useRef(0);
+  const [devices, setDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState('');
+  const [cameraError, setCameraError] = useState('');
+  const [loadingCamera, setLoadingCamera] = useState(true);
+
+  const stopCamera = () => {
+    requestSequenceRef.current += 1;
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+  };
+
+  const cameraErrorMessage = (err) => {
+    if (!window.isSecureContext) {
+      return 'La cámara solo funciona desde HTTPS o desde localhost. Abra la aplicación mediante una dirección segura.';
+    }
+    if (err?.name === 'NotAllowedError' || err?.name === 'SecurityError') {
+      return 'El navegador no tiene permiso para usar la cámara. Permita el acceso desde el icono de cámara o candado de la barra de direcciones.';
+    }
+    if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError') {
+      return 'No se detectó ninguna cámara. Verifique que la webcam esté conectada y que otra aplicación no la esté utilizando.';
+    }
+    if (err?.name === 'NotReadableError' || err?.name === 'TrackStartError') {
+      return 'La cámara está ocupada o no pudo iniciarse. Cierre Zoom, Meet u otra aplicación que pueda estar usando la webcam.';
+    }
+    if (err?.name === 'OverconstrainedError') {
+      return 'La cámara seleccionada ya no está disponible. Seleccione otra cámara o vuelva a conectarla.';
+    }
+    return 'No fue posible iniciar la cámara. Revise los permisos del navegador y la conexión de la webcam.';
+  };
+
+  const startCamera = async (deviceId = '') => {
+    setLoadingCamera(true);
+    setCameraError('');
+    stopCamera();
+    const requestSequence = requestSequenceRef.current;
+
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('MEDIA_DEVICES_UNAVAILABLE');
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: deviceId
+          ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+          : { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
+      });
+
+      if (requestSequence !== requestSequenceRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      }
+
+      const availableDevices = (await navigator.mediaDevices.enumerateDevices())
+        .filter(device => device.kind === 'videoinput');
+      setDevices(availableDevices);
+
+      const activeDeviceId = stream.getVideoTracks()[0]?.getSettings()?.deviceId || deviceId;
+      setSelectedDeviceId(activeDeviceId || '');
+    } catch (err) {
+      if (requestSequence !== requestSequenceRef.current) return;
+      setCameraError(
+        err?.message === 'MEDIA_DEVICES_UNAVAILABLE'
+          ? 'Este navegador no permite capturar desde una webcam. Utilice Chrome, Edge o Firefox actualizado, o suba la foto como archivo.'
+          : cameraErrorMessage(err)
+      );
+    } finally {
+      if (requestSequence === requestSequenceRef.current) {
+        setLoadingCamera(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const startTimer = window.setTimeout(() => startCamera(), 0);
+    return () => {
+      window.clearTimeout(startTimer);
+      stopCamera();
+    };
+  }, []);
+
+  const handleClose = () => {
+    stopCamera();
+    onClose();
+  };
+
+  const handleCapture = () => {
+    const video = videoRef.current;
+    if (!video?.videoWidth || !video?.videoHeight) {
+      setCameraError('La cámara todavía está iniciando. Espere un momento y vuelva a intentarlo.');
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    const outputWidth = Math.min(480, video.videoWidth);
+    const scale = outputWidth / video.videoWidth;
+    canvas.width = outputWidth;
+    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    onCapture(canvas.toDataURL('image/jpeg', 0.72));
+    handleClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 backdrop-blur-sm p-4">
+      <div className="w-full max-w-2xl rounded-2xl bg-surface-container-lowest border border-outline-variant shadow-2xl overflow-hidden">
+        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-outline-variant">
+          <div>
+            <h3 className="text-base font-extrabold text-primary">Tomar foto con la webcam</h3>
+            <p className="text-[11px] text-on-surface-variant mt-1">Seleccione la cámara conectada, encuadre al residente y capture la imagen.</p>
+          </div>
+          <button type="button" onClick={handleClose} className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container" aria-label="Cerrar cámara">
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <div className="p-5 flex flex-col gap-4">
+          {devices.length > 1 && (
+            <div>
+              <label className="text-xs font-bold text-on-surface-variant block mb-1">Cámara disponible</label>
+              <select
+                value={selectedDeviceId}
+                onChange={event => startCamera(event.target.value)}
+                className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
+              >
+                {devices.map((device, index) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label || `Cámara ${index + 1}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="relative aspect-video overflow-hidden rounded-xl bg-black border border-outline-variant flex items-center justify-center">
+            <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+            {loadingCamera && (
+              <div className="absolute inset-0 flex flex-col gap-2 items-center justify-center bg-black/65 text-white text-center px-6">
+                <span className="text-xs font-bold">Iniciando cámara…</span>
+                <span className="text-[10px] text-white/80">Si el navegador pregunta, seleccione “Permitir” para continuar.</span>
+              </div>
+            )}
+          </div>
+
+          {cameraError && (
+            <div className="rounded-xl border border-error/30 bg-error-container/20 p-3 text-xs font-semibold text-error">
+              {cameraError}
+            </div>
+          )}
+
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+            <button type="button" onClick={handleClose} className="px-4 py-2.5 rounded-lg border border-outline-variant text-xs font-bold text-on-surface">
+              Cancelar
+            </button>
+            {cameraError ? (
+              <button type="button" onClick={() => startCamera(selectedDeviceId)} className="px-4 py-2.5 rounded-lg bg-primary text-on-primary text-xs font-bold">
+                Reintentar
+              </button>
+            ) : (
+              <button type="button" onClick={handleCapture} disabled={loadingCamera} className="px-4 py-2.5 rounded-lg bg-primary text-on-primary text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                <span className="material-symbols-outlined text-base">photo_camera</span>
+                Capturar foto
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Registration({ token }) {
   const { refugioId } = useParams();
   const navigate = useNavigate();
@@ -71,6 +252,7 @@ export default function Registration({ token }) {
   
   // Photo state (Head)
   const [photo, setPhoto] = useState('');
+  const [cameraTarget, setCameraTarget] = useState(null);
   
   // Demographics & Contact
   const [contactPhone, setContactPhone] = useState('');
@@ -240,6 +422,14 @@ export default function Registration({ token }) {
       } else {
         handleUpdateMember(index, 'photo', base64);
       }
+    }
+  };
+
+  const handleCameraCapture = (base64) => {
+    if (cameraTarget?.isHead) {
+      setPhoto(base64);
+    } else if (Number.isInteger(cameraTarget?.index)) {
+      handleUpdateMember(cameraTarget.index, 'photo', base64);
     }
   };
 
@@ -708,6 +898,13 @@ export default function Registration({ token }) {
         </div>
       )}
 
+      {cameraTarget && (
+        <CameraCaptureDialog
+          onCapture={handleCameraCapture}
+          onClose={() => setCameraTarget(null)}
+        />
+      )}
+
       {/* Main Layout Card */}
       <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl shadow-xs overflow-hidden grid grid-cols-1 lg:grid-cols-4 min-h-[500px]">
         
@@ -772,18 +969,29 @@ export default function Registration({ token }) {
                     <span className="material-symbols-outlined text-3xl text-on-surface-variant">person</span>
                   )}
                 </div>
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-2">
                   <span className="text-xs font-bold text-on-surface">Foto de Perfil del Residente</span>
-                  <label className="px-3 py-1.5 bg-primary text-on-primary text-[10px] font-bold rounded-lg cursor-pointer hover:opacity-90 inline-block text-center w-max">
-                    Subir o Tomar Foto 📷
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      capture="environment" 
-                      onChange={(e) => handlePhotoUpload(e, true)}
-                      className="hidden" 
-                    />
-                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCameraTarget({ isHead: true })}
+                      className="px-3 py-1.5 bg-primary text-on-primary text-[10px] font-bold rounded-lg cursor-pointer hover:opacity-90 inline-flex items-center gap-1.5"
+                    >
+                      <span className="material-symbols-outlined text-sm">photo_camera</span>
+                      Tomar con webcam
+                    </button>
+                    <label className="px-3 py-1.5 bg-surface border border-outline-variant text-primary text-[10px] font-bold rounded-lg cursor-pointer hover:bg-surface-container inline-flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-sm">upload</span>
+                      Subir archivo
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handlePhotoUpload(e, true)}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                  <span className="text-[9px] text-on-surface-variant">La webcam requiere permiso del navegador y una conexión HTTPS o localhost.</span>
                 </div>
               </div>
 
@@ -1364,16 +1572,26 @@ export default function Registration({ token }) {
                                 <span className="material-symbols-outlined text-xl text-on-surface-variant">person</span>
                               )}
                             </div>
-                            <label className="px-2 py-1 bg-surface border border-outline-variant text-[9px] font-bold rounded-md cursor-pointer hover:bg-surface-container">
-                              Subir/Tomar Foto 📷
-                              <input 
-                                type="file" 
-                                accept="image/*" 
-                                capture="environment" 
-                                onChange={(e) => handlePhotoUpload(e, false, index)}
-                                className="hidden" 
-                              />
-                            </label>
+                            <div className="flex flex-wrap gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setCameraTarget({ isHead: false, index })}
+                                className="px-2 py-1 bg-primary text-on-primary text-[9px] font-bold rounded-md cursor-pointer hover:opacity-90 inline-flex items-center gap-1"
+                              >
+                                <span className="material-symbols-outlined text-xs">photo_camera</span>
+                                Webcam
+                              </button>
+                              <label className="px-2 py-1 bg-surface border border-outline-variant text-[9px] font-bold rounded-md cursor-pointer hover:bg-surface-container inline-flex items-center gap-1">
+                                <span className="material-symbols-outlined text-xs">upload</span>
+                                Archivo
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) => handlePhotoUpload(e, false, index)}
+                                  className="hidden"
+                                />
+                              </label>
+                            </div>
                           </div>
 
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
