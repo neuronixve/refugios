@@ -355,6 +355,12 @@ app.post('/api/users', authenticateToken, async (req, res) => {
 
   const cleanDocumentId = (document_id || '').trim();
   const cleanStaffFunction = (staff_function || '').trim();
+  const requiresSignatureData = ['registro', 'apoyo'].includes(role);
+  if (requiresSignatureData && (!cleanDocumentId || !cleanStaffFunction)) {
+    return res.status(400).json({
+      error: 'La cédula y la función institucional son obligatorias para el personal de Registro y OAC.'
+    });
+  }
   if (!email && cleanDocumentId) {
     email = `personal.${cleanDocumentId.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}@campamento.local`;
   }
@@ -386,6 +392,16 @@ app.post('/api/users', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'El correo electrónico ya está registrado.' });
     }
 
+    if (cleanDocumentId) {
+      const documentCheck = await db.query(
+        'SELECT id FROM users WHERE LOWER(BTRIM(document_id)) = LOWER($1) AND deleted_at IS NULL',
+        [cleanDocumentId]
+      );
+      if (documentCheck.rows.length > 0) {
+        return res.status(400).json({ error: 'La cédula ya está registrada para otro funcionario.' });
+      }
+    }
+
     // Hash de la contraseña
     const passwordHash = await bcrypt.hash(password, 10);
     
@@ -414,9 +430,16 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { name, email, password, role, refugio_id, document_id, photo, staff_function } = req.body;
   const shouldUpdatePhoto = Object.prototype.hasOwnProperty.call(req.body, 'photo');
+  const cleanDocumentId = (document_id || '').trim();
+  const cleanStaffFunction = (staff_function || '').trim();
 
   if (!name || !email || !role) {
     return res.status(400).json({ error: 'Nombre, email y rol son requeridos.' });
+  }
+  if (['registro', 'apoyo'].includes(role) && (!cleanDocumentId || !cleanStaffFunction)) {
+    return res.status(400).json({
+      error: 'La cédula y la función institucional son obligatorias para el personal de Registro y OAC.'
+    });
   }
 
   // Validación de Jerarquía de Creación/Modificación
@@ -440,6 +463,16 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'El correo electrónico ya está registrado por otro usuario.' });
     }
 
+    if (cleanDocumentId) {
+      const documentCheck = await db.query(
+        'SELECT id FROM users WHERE LOWER(BTRIM(document_id)) = LOWER($1) AND id <> $2 AND deleted_at IS NULL',
+        [cleanDocumentId, id]
+      );
+      if (documentCheck.rows.length > 0) {
+        return res.status(400).json({ error: 'La cédula ya está registrada para otro funcionario.' });
+      }
+    }
+
     // Asignación de refugio_id automática si el creador es Gerente
     let targetRefugioId = refugio_id;
     if (req.user.role === 'gerente' || req.user.role === 'registro') {
@@ -452,7 +485,7 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
           staff_function = $7
       WHERE id = $9
       RETURNING id, name, email, role, refugio_id, document_id, photo, staff_function`;
-    let queryParams = [name, email, role, targetRefugioId || null, document_id || null, photo || null, staff_function || null, shouldUpdatePhoto, id];
+    let queryParams = [name, email, role, targetRefugioId || null, cleanDocumentId || null, photo || null, cleanStaffFunction || null, shouldUpdatePhoto, id];
 
     if (password && password.trim() !== '') {
       const passwordHash = await bcrypt.hash(password, 10);
@@ -463,7 +496,7 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
             password_hash = $8
         WHERE id = $10
         RETURNING id, name, email, role, refugio_id, document_id, photo, staff_function`;
-      queryParams = [name, email, role, targetRefugioId || null, document_id || null, photo || null, staff_function || null, passwordHash, shouldUpdatePhoto, id];
+      queryParams = [name, email, role, targetRefugioId || null, cleanDocumentId || null, photo || null, cleanStaffFunction || null, passwordHash, shouldUpdatePhoto, id];
     }
 
     const result = await db.query(queryText, queryParams);

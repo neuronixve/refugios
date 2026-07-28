@@ -53,6 +53,8 @@ export default function Configuracion({ token, user }) {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState('');
+  const [newUserDocumentId, setNewUserDocumentId] = useState('');
+  const [newUserStaffFunction, setNewUserStaffFunction] = useState('');
   const [newUserRefugioId, setNewUserRefugioId] = useState('');
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [editingUserId, setEditingUserId] = useState(null);
@@ -368,6 +370,12 @@ export default function Configuracion({ token, user }) {
       return;
     }
 
+    const requiresSignatureData = ['registro', 'apoyo'].includes(newUserRole);
+    if (requiresSignatureData && (!newUserDocumentId.trim() || !newUserStaffFunction.trim())) {
+      setError('La cédula y la función institucional son obligatorias para el personal de Registro y OAC.');
+      return;
+    }
+
     const needsRefugio = ['gerente', 'medico', 'seguridad', 'cocina', 'almacen', 'registro', 'apoyo'].includes(newUserRole);
     let targetRefugio = newUserRefugioId;
     if (user.role === 'gerente') {
@@ -394,7 +402,9 @@ export default function Configuracion({ token, user }) {
           email: newUserEmail,
           password: newUserPassword,
           role: newUserRole,
-          refugio_id: needsRefugio ? parseInt(targetRefugio) : null
+          refugio_id: needsRefugio ? parseInt(targetRefugio) : null,
+          document_id: newUserDocumentId.trim(),
+          staff_function: newUserStaffFunction.trim()
         })
       });
 
@@ -421,6 +431,8 @@ export default function Configuracion({ token, user }) {
     setNewUserEmail(u.email);
     setNewUserPassword('');
     setNewUserRole(u.role);
+    setNewUserDocumentId(u.document_id || '');
+    setNewUserStaffFunction(u.staff_function || staffFunctionDefaults[u.role] || roleLabels[u.role] || '');
     setNewUserRefugioId(u.refugio_id ? String(u.refugio_id) : '');
 
     window.requestAnimationFrame(() => {
@@ -435,6 +447,8 @@ export default function Configuracion({ token, user }) {
     setNewUserEmail('');
     setNewUserPassword('');
     setNewUserRole('');
+    setNewUserDocumentId('');
+    setNewUserStaffFunction('');
     setNewUserRefugioId('');
   };
 
@@ -503,6 +517,31 @@ export default function Configuracion({ token, user }) {
     almacen: 'Personal Almacén',
     registro: 'Personal Registro',
     apoyo: 'Apoyo Social'
+  };
+
+  const staffFunctionDefaults = {
+    supervisor: 'Supervisor Global',
+    gerente: 'Gerente de Sede',
+    medico: 'Personal Médico',
+    seguridad: 'Personal de Seguridad',
+    cocina: 'Personal de Cocina',
+    almacen: 'Personal de Almacén',
+    registro: 'Personal de Registro',
+    apoyo: 'Profesional OAC'
+  };
+
+  const signatureStaffFunctions = [
+    'Personal de Registro',
+    'Profesional OAC',
+    'Personal OAC',
+    'Trabajador(a) Social OAC'
+  ];
+
+  const handleUserRoleChange = (role) => {
+    setNewUserRole(role);
+    if (!isEditingUser || !newUserStaffFunction.trim()) {
+      setNewUserStaffFunction(staffFunctionDefaults[role] || '');
+    }
   };
 
   // Group beds by room
@@ -827,6 +866,25 @@ export default function Configuracion({ token, user }) {
               </div>
 
               <div>
+                <label className="text-xs font-bold text-on-surface-variant block mb-1">
+                  Número de cédula
+                  {['registro', 'apoyo'].includes(newUserRole) && <span className="text-error"> *</span>}
+                </label>
+                <input
+                  type="text"
+                  value={newUserDocumentId}
+                  onChange={e => setNewUserDocumentId(e.target.value.toUpperCase())}
+                  placeholder="Ej. V-12.345.678"
+                  autoComplete="off"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+                  required={['registro', 'apoyo'].includes(newUserRole)}
+                />
+                <p className="text-[10px] text-on-surface-variant mt-1">
+                  Se utilizará como C.I. del funcionario en la firma de las planillas.
+                </p>
+              </div>
+
+              <div>
                 <label className="text-xs font-bold text-on-surface-variant block mb-1">Correo Electrónico</label>
                 <input 
                   type="email"
@@ -856,7 +914,7 @@ export default function Configuracion({ token, user }) {
                 <label className="text-xs font-bold text-on-surface-variant block mb-1">Rol de Acceso</label>
                 <select
                   value={newUserRole}
-                  onChange={e => setNewUserRole(e.target.value)}
+                  onChange={e => handleUserRoleChange(e.target.value)}
                   className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
                   required
                 >
@@ -865,6 +923,40 @@ export default function Configuracion({ token, user }) {
                     <option key={r.value} value={r.value}>{r.label}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-on-surface-variant block mb-1">
+                  Función institucional
+                  {['registro', 'apoyo'].includes(newUserRole) && <span className="text-error"> *</span>}
+                </label>
+                {['registro', 'apoyo'].includes(newUserRole) ? (
+                  <select
+                    value={newUserStaffFunction}
+                    onChange={e => setNewUserStaffFunction(e.target.value)}
+                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+                    required
+                  >
+                    <option value="">-- Seleccionar función --</option>
+                    {newUserStaffFunction && !signatureStaffFunctions.includes(newUserStaffFunction) && (
+                      <option value={newUserStaffFunction}>{newUserStaffFunction} (actual)</option>
+                    )}
+                    {signatureStaffFunctions.map(fn => (
+                      <option key={fn} value={fn}>{fn}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={newUserStaffFunction}
+                    onChange={e => setNewUserStaffFunction(e.target.value)}
+                    placeholder="Ej. Gerente de Sede"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+                  />
+                )}
+                <p className="text-[10px] text-on-surface-variant mt-1">
+                  Permite identificar el cargo que ejerce el funcionario dentro del SAREN.
+                </p>
               </div>
 
               {/* Sede context dropdown (only rendered if role needs a refugio, and creator is admin/supervisor) */}
@@ -918,8 +1010,9 @@ export default function Configuracion({ token, user }) {
                   <thead>
                     <tr className="border-b border-outline-variant text-on-surface-variant font-bold">
                       <th className="py-2.5 px-4">Nombre Completo</th>
+                      <th className="py-2.5 px-4">Cédula</th>
                       <th className="py-2.5 px-4">Correo</th>
-                      <th className="py-2.5 px-4">Rol del Sistema</th>
+                      <th className="py-2.5 px-4">Rol / Función</th>
                       <th className="py-2.5 px-4">Sede / Refugio</th>
                       <th className="py-2.5 px-4 text-right">Acción</th>
                     </tr>
@@ -928,6 +1021,9 @@ export default function Configuracion({ token, user }) {
                     {usersList.map(u => (
                       <tr key={u.id} className="border-b border-outline-variant hover:bg-surface-container/20">
                         <td className="py-3 px-4 font-bold text-primary">{u.name}</td>
+                        <td className="py-3 px-4 text-on-surface-variant font-mono text-[10px]">
+                          {u.document_id || 'Sin registrar'}
+                        </td>
                         <td className="py-3 px-4 text-on-surface-variant font-mono text-[10px]">{u.email}</td>
                         <td className="py-3 px-4">
                           <span className={`px-2 py-0.5 rounded font-black text-[9px] uppercase ${
@@ -936,6 +1032,11 @@ export default function Configuracion({ token, user }) {
                           }`}>
                             {roleLabels[u.role] || u.role}
                           </span>
+                          {u.staff_function && (
+                            <span className="block mt-1 text-[10px] font-semibold text-on-surface-variant">
+                              {u.staff_function}
+                            </span>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-on-surface-variant font-medium">
                           {u.refugio_name || (u.role === 'admin' || u.role === 'supervisor' ? 'Acceso Global' : 'Sin Sede')}

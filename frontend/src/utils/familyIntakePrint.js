@@ -160,11 +160,11 @@ export function buildFamilyIntakeHtml({ family, members = [], refugio, assetBase
   <meta charset="utf-8" />
   <title>Planilla integral - ${escapeHtml(family.family_name)}</title>
   <style>
-    @page { size: Letter portrait; margin: 0.35in; }
+    @page { size: Letter portrait; margin: 0; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 8pt; line-height: 1.12; }
-    .page { position: relative; width: 7.8in; min-height: 10.3in; padding-bottom: 0.22in; break-after: page; page-break-after: always; }
+    .page { width: 8.5in; padding: 0.35in; break-after: page; page-break-after: always; }
     .page:last-of-type { break-after: auto; page-break-after: auto; }
     h2 { margin: 0.09in 0 0.045in; color: #1f4e79; font-size: 10pt; line-height: 1.05; font-weight: 700; }
     p { margin: 0; }
@@ -201,13 +201,13 @@ export function buildFamilyIntakeHtml({ family, members = [], refugio, assetBase
     .filled { display: inline-block; min-width: 0.38in; border-bottom: 0.5pt solid #222; padding: 0 0.02in 0.005in; }
     .box { font-family: Arial, Helvetica, sans-serif; white-space: nowrap; font-weight: 400; }
     .center { text-align: center; }
-    .footer { position: absolute; left: 0; right: 0; bottom: 0.02in; text-align: center; color: #666; font-size: 7pt; }
+    .footer { margin-top: 0.12in; text-align: center; color: #666; font-size: 7pt; }
     .screen-actions { position: fixed; z-index: 20; right: 16px; top: 16px; display: flex; gap: 8px; }
     .screen-actions button { border: 0; border-radius: 8px; padding: 10px 16px; font-weight: 700; cursor: pointer; }
     .print { background: #1f4e79; color: #fff; }
     .close { background: #eee; color: #222; }
-    @media screen { body { background: #d7d7d7; } .page { margin: 18px auto; padding: 0.35in 0.35in 0.22in; width: 8.5in; min-height: 11in; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.18); } }
-    @media print { .screen-actions { display: none; } .page { width: auto; min-height: 10.3in; padding: 0 0 0.22in; margin: 0; box-shadow: none; } }
+    @media screen { body { background: #d7d7d7; } .page { margin: 18px auto; min-height: 11in; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.18); } }
+    @media print { .screen-actions { display: none; } .page { width: 8.5in; min-height: 0; margin: 0; box-shadow: none; } }
   </style>
 </head>
 <body>
@@ -375,4 +375,9 @@ export function printFamilyIntake({ family, members, refugio }) {
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
+  try {
+    printWindow.history.replaceState({}, '', `/planilla-familiar/${encodeURIComponent(family.id || 'vista')}`);
+  } catch {
+    // La planilla sigue siendo imprimible aunque el navegador no permita modificar la URL temporal.
+  }
 }
