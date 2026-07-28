@@ -184,54 +184,61 @@ export default function App() {
   // If not authenticated, render Login Page (styled premium style)
   if (!token) {
     return (
-      <div className="min-h-screen bg-background flex flex-col justify-center items-center px-4">
-        <div className="w-full max-w-md bg-surface-container-lowest border border-outline-variant p-8 rounded-2xl shadow-lg flex flex-col gap-6">
-          <div className="text-center flex flex-col gap-2">
-            <img src="/logo-saren.png" alt="Logo de SAREN" className="w-full max-w-[340px] h-auto object-contain mx-auto" />
-            <p className="text-xs text-on-surface-variant font-medium mt-1">Sistema de Gestión y Coordinación Sanitaria de Campamentos Temporales</p>
-          </div>
+      <div
+        className="relative min-h-screen flex items-center justify-center overflow-hidden px-4 py-8"
+        style={{ backgroundImage: "url('/fondo-login.jpeg')", backgroundSize: 'cover', backgroundPosition: 'center' }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-br from-white/35 via-white/65 to-[#dce8ff]/80" />
+        <main className="relative w-full max-w-md overflow-hidden rounded-[28px] border border-white/80 bg-white shadow-[0_28px_80px_rgba(5,24,68,0.22)]">
+          <section
+            className="h-44 bg-[#08164a] bg-center bg-no-repeat sm:h-48"
+            style={{ backgroundImage: "url('/campamento-oscuro.jpeg')", backgroundSize: '105%' }}
+            aria-label="Campamento Transitorio SAREN"
+          />
 
-          {error && (
-            <div className="bg-error-container/20 border border-error/25 text-error p-3 rounded-lg text-xs font-semibold">
-              {error}
-            </div>
-          )}
+          <section className="px-7 py-8 sm:px-10 sm:py-10">
+            {error && (
+              <div className="mb-5 bg-error-container/20 border border-error/25 text-error p-3 rounded-lg text-xs font-semibold">
+                {error}
+              </div>
+            )}
 
-          <form onSubmit={handleLogin} className="flex flex-col gap-4">
-            <div>
-              <label className="text-xs font-bold text-on-surface-variant block mb-1">Correo Electrónico</label>
-              <input 
-                type="email" 
-                value={email} 
-                onChange={(e) => setEmail(e.target.value)} 
-                placeholder="usuario@mincoex.gob.ve"
-                className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
-                required
-              />
-            </div>
+            <form onSubmit={handleLogin} className="flex flex-col gap-5">
+              <div>
+                <label className="text-xs font-bold text-on-surface-variant block mb-1.5">Correo electrónico</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="usuario@mincoex.gob.ve"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-xl p-3.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary font-medium"
+                  required
+                />
+              </div>
 
-            <div>
-              <label className="text-xs font-bold text-on-surface-variant block mb-1">Contraseña</label>
-              <input 
-                type="password" 
-                value={password} 
-                onChange={(e) => setPassword(e.target.value)} 
-                placeholder="Ingrese su contraseña"
-                className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                required
-              />
-            </div>
+              <div>
+                <label className="text-xs font-bold text-on-surface-variant block mb-1.5">Contraseña</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Ingrese su contraseña"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-xl p-3.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  required
+                />
+              </div>
 
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="w-full py-3 bg-[#0b2347] text-white font-bold rounded-lg text-xs hover:bg-[#0b2347]/95 transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
-            >
-              {loading ? 'Iniciando Sesión...' : 'Iniciar Sesión'}
-              <span className="material-symbols-outlined text-sm">login</span>
-            </button>
-          </form>
-        </div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3.5 bg-[#0b2347] text-white font-bold rounded-xl text-xs hover:bg-[#122f5c] transition-all shadow-lg shadow-[#0b2347]/20 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+              >
+                {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
+                <span className="material-symbols-outlined text-sm">login</span>
+              </button>
+            </form>
+          </section>
+        </main>
       </div>
     );
   }

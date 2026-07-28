@@ -48,7 +48,11 @@ export default function Sidebar({ user, selectedRefugio, onLogout, mobileOpen = 
       <div className="flex flex-col gap-2 mb-6">
         <div className="px-2">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-xs font-black text-primary uppercase tracking-wider">Venezuela Renacerá</h2>
+            <img
+              src="/campamento-logo-transparente.png"
+              alt="Campamento Transitorio SAREN"
+              className="h-auto w-full max-w-[218px] object-contain object-left"
+            />
             <button
               type="button"
               onClick={onMobileClose}

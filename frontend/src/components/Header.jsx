@@ -41,7 +41,7 @@ export default function Header({ user, selectedRefugio, onMenuClick }) {
         )}
       </div>
 
-      {/* Logo de SAREN, información del usuario y acciones */}
+      {/* Logo SAREN, información del usuario y acciones */}
       <div className="flex items-center gap-4">
         <img src="/logo-saren.png" alt="Logo de SAREN" className="hidden md:block w-28 lg:w-36 xl:w-40 h-auto object-contain mr-2" />
         {user && (

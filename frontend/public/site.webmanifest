@@ -1,0 +1,17 @@
+{
+  "name": "Campamento Transitorio SAREN",
+  "short_name": "Campamento SAREN",
+  "description": "Sistema de gestión integral del Campamento Transitorio SAREN.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f9ff",
+  "theme_color": "#08164a",
+  "icons": [
+    {
+      "src": "/campamento-app-icon.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

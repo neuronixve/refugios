@@ -224,7 +224,7 @@ export default function Welcome({ token, user, onSelectRefugio }) {
       {/* Welcome Header */}
       <header className="mb-10">
         <div>
-          <span className="text-primary font-bold text-xs tracking-widest uppercase block">Venezuela Renacerá</span>
+          <span className="text-primary font-bold text-xs tracking-widest uppercase block">Campamento Transitorio SAREN</span>
           <h1 className="text-3xl font-extrabold text-primary mt-1">Selección de Sede Operativa</h1>
           <p className="text-body-md text-on-surface-variant max-w-2xl mt-2">
             Supervise el estado general de la red o seleccione una sede específica para gestionar sus recursos, ingresos y suministros en tiempo real.

@@ -447,7 +447,7 @@ export default function CarnetizacionPersonal({ token, selectedRefugio }) {
         >
           <div className="flex items-center gap-1">
             <span style={{ fontSize: '5pt' }} className="font-extrabold uppercase text-white tracking-widest">
-              Venezuela Renacerá
+              Campamento Transitorio SAREN
             </span>
           </div>
           <span style={{ fontSize: '4.5pt' }} className="font-mono text-white/70">
