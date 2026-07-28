@@ -60,6 +60,13 @@ export default function Configuracion({ token, user }) {
   const [editingUserId, setEditingUserId] = useState(null);
   const userFormRef = useRef(null);
 
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [ownNewPassword, setOwnNewPassword] = useState('');
+  const [confirmOwnPassword, setConfirmOwnPassword] = useState('');
+  const [changingOwnPassword, setChangingOwnPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordMessage, setPasswordMessage] = useState('');
+
   const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
     : 'https://api.venezuelarenacera.com/api');
@@ -452,6 +459,61 @@ export default function Configuracion({ token, user }) {
     setNewUserRefugioId('');
   };
 
+  const handleOwnPasswordChange = async (event) => {
+    event.preventDefault();
+    setPasswordError('');
+    setPasswordMessage('');
+
+    if (!currentPassword || !ownNewPassword || !confirmOwnPassword) {
+      setPasswordError('Complete los tres campos de contraseña.');
+      return;
+    }
+    if (ownNewPassword.length < 8) {
+      setPasswordError('La nueva contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+    if (ownNewPassword !== confirmOwnPassword) {
+      setPasswordError('La confirmación no coincide con la nueva contraseña.');
+      return;
+    }
+    if (currentPassword === ownNewPassword) {
+      setPasswordError('La nueva contraseña debe ser diferente de la contraseña actual.');
+      return;
+    }
+
+    setChangingOwnPassword(true);
+    try {
+      const res = await fetchWithTimeout(`${API_BASE}/auth/password`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: ownNewPassword
+        })
+      });
+      const data = await readApiResponse(res);
+      if (!res.ok) {
+        throw new Error(data.error || 'No fue posible actualizar la contraseña.');
+      }
+
+      setCurrentPassword('');
+      setOwnNewPassword('');
+      setConfirmOwnPassword('');
+      setPasswordMessage('Contraseña actualizada correctamente. Utilícela en su próximo inicio de sesión.');
+    } catch (err) {
+      setPasswordError(
+        err.name === 'AbortError'
+          ? 'El servidor tardó demasiado en responder.'
+          : err.message
+      );
+    } finally {
+      setChangingOwnPassword(false);
+    }
+  };
+
   const handleDeleteUser = async (id, name) => {
     if (!window.confirm(`¿Estás seguro de que deseas eliminar al usuario '${name}'?`)) {
       return;
@@ -479,6 +541,7 @@ export default function Configuracion({ token, user }) {
     if (!user) return [];
     if (user.role === 'admin') {
       return [
+        { value: 'admin', label: 'Superusuario (Acceso total al sistema)' },
         { value: 'supervisor', label: 'Supervisor Global (Reportes/Sedes)' },
         { value: 'gerente', label: 'Gerente de Sede (Administrador de Sede)' },
         { value: 'medico', label: 'Personal Médico (Triaje y Reporte)' },
@@ -520,6 +583,7 @@ export default function Configuracion({ token, user }) {
   };
 
   const staffFunctionDefaults = {
+    admin: 'Superusuario',
     supervisor: 'Supervisor Global',
     gerente: 'Gerente de Sede',
     medico: 'Personal Médico',
@@ -844,7 +908,82 @@ export default function Configuracion({ token, user }) {
         </>
       ) : (
         /* TAB DE GESTIÓN DE PERSONAL */
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <>
+          {user?.role === 'admin' && (
+            <section className="mb-8 bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-xs">
+              <div className="flex items-start gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                  <span className="material-symbols-outlined">lock_reset</span>
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-primary">Seguridad de mi cuenta</h3>
+                  <p className="text-[11px] text-on-surface-variant mt-1">
+                    Cambie la contraseña del superusuario actualmente autenticado. Por seguridad se solicitará la contraseña vigente.
+                  </p>
+                </div>
+              </div>
+
+              {passwordError && (
+                <div className="mb-4 p-3 rounded-lg border border-error/30 bg-error-container/20 text-error text-xs font-semibold">
+                  {passwordError}
+                </div>
+              )}
+              {passwordMessage && (
+                <div className="mb-4 p-3 rounded-lg border border-success/30 bg-success/10 text-success text-xs font-semibold">
+                  {passwordMessage}
+                </div>
+              )}
+
+              <form onSubmit={handleOwnPasswordChange} className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-4 items-end">
+                <div>
+                  <label className="text-xs font-bold text-on-surface-variant block mb-1">Contraseña actual</label>
+                  <input
+                    type="password"
+                    value={currentPassword}
+                    onChange={event => setCurrentPassword(event.target.value)}
+                    autoComplete="current-password"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-on-surface-variant block mb-1">Nueva contraseña</label>
+                  <input
+                    type="password"
+                    value={ownNewPassword}
+                    onChange={event => setOwnNewPassword(event.target.value)}
+                    autoComplete="new-password"
+                    minLength={8}
+                    placeholder="Mínimo 8 caracteres"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-on-surface-variant block mb-1">Confirmar nueva contraseña</label>
+                  <input
+                    type="password"
+                    value={confirmOwnPassword}
+                    onChange={event => setConfirmOwnPassword(event.target.value)}
+                    autoComplete="new-password"
+                    minLength={8}
+                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={changingOwnPassword}
+                  className="py-2.5 px-4 bg-primary text-on-primary font-bold rounded-lg text-xs disabled:opacity-60 inline-flex items-center justify-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-base">password</span>
+                  {changingOwnPassword ? 'Actualizando…' : 'Cambiar contraseña'}
+                </button>
+              </form>
+            </section>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
           {/* Formulario Registro de Personal */}
           <div ref={userFormRef} className="bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-xs h-fit">
@@ -896,19 +1035,25 @@ export default function Configuracion({ token, user }) {
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-on-surface-variant block mb-1">
-                  {isEditingUser ? 'Nueva Contraseña (dejar vacío para conservar)' : 'Contraseña Inicial'}
-                </label>
-                <input 
-                  type="password"
-                  value={newUserPassword}
-                  onChange={e => setNewUserPassword(e.target.value)}
-                  placeholder={isEditingUser ? 'Opcional' : 'Mínimo 6 caracteres'}
-                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
-                  required={!isEditingUser}
-                />
-              </div>
+              {isEditingUser && parseInt(editingUserId) === parseInt(user?.id) ? (
+                <div className="p-3 rounded-lg border border-primary/20 bg-primary/5 text-[10px] text-on-surface-variant font-semibold">
+                  Para cambiar su propia contraseña utilice la sección “Seguridad de mi cuenta”.
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs font-bold text-on-surface-variant block mb-1">
+                    {isEditingUser ? 'Nueva Contraseña (dejar vacío para conservar)' : 'Contraseña Inicial'}
+                  </label>
+                  <input
+                    type="password"
+                    value={newUserPassword}
+                    onChange={e => setNewUserPassword(e.target.value)}
+                    placeholder={isEditingUser ? 'Opcional' : 'Mínimo 6 caracteres'}
+                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+                    required={!isEditingUser}
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-bold text-on-surface-variant block mb-1">Rol de Acceso</label>
@@ -1077,7 +1222,8 @@ export default function Configuracion({ token, user }) {
             )}
           </div>
 
-        </div>
+          </div>
+        </>
       )}
 
     </div>

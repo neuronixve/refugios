@@ -259,6 +259,47 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
   }
 });
 
+// Cambiar la contraseña de la cuenta autenticada.
+app.put('/api/auth/password', authenticateToken, async (req, res) => {
+  const { current_password, new_password } = req.body;
+
+  if (!current_password || !new_password) {
+    return res.status(400).json({ error: 'Debe indicar la contraseña actual y la nueva contraseña.' });
+  }
+  if (new_password.length < 8) {
+    return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 8 caracteres.' });
+  }
+
+  try {
+    const userRes = await db.query(
+      'SELECT id, password_hash FROM users WHERE id = $1 AND COALESCE(is_active, TRUE) = TRUE',
+      [req.user.id]
+    );
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado.' });
+    }
+
+    const user = userRes.rows[0];
+    const validCurrentPassword = await bcrypt.compare(current_password, user.password_hash);
+    if (!validCurrentPassword) {
+      return res.status(401).json({ error: 'La contraseña actual no es correcta.' });
+    }
+
+    const repeatsCurrentPassword = await bcrypt.compare(new_password, user.password_hash);
+    if (repeatsCurrentPassword) {
+      return res.status(400).json({ error: 'La nueva contraseña debe ser diferente de la contraseña actual.' });
+    }
+
+    const newPasswordHash = await bcrypt.hash(new_password, 10);
+    await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newPasswordHash, req.user.id]);
+
+    res.json({ message: 'Contraseña actualizada correctamente.' });
+  } catch (err) {
+    console.error('Error cambiando contraseña propia:', err);
+    res.status(500).json({ error: 'No fue posible actualizar la contraseña.' });
+  }
+});
+
 // --- RUTAS DE GESTIÓN DE USUARIOS (RBAC) ---
 
 // Obtener listado de usuarios según permisos del rol logueado
@@ -435,6 +476,11 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
 
   if (!name || !email || !role) {
     return res.status(400).json({ error: 'Nombre, email y rol son requeridos.' });
+  }
+  if (parseInt(id) === parseInt(req.user.id) && password && password.trim() !== '') {
+    return res.status(400).json({
+      error: 'Para cambiar su propia contraseña utilice la sección “Seguridad de mi cuenta”.'
+    });
   }
   if (['registro', 'apoyo'].includes(role) && (!cleanDocumentId || !cleanStaffFunction)) {
     return res.status(400).json({
