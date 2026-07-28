@@ -22,7 +22,7 @@ export default function Header({ user, selectedRefugio, onMenuClick }) {
           <img
             src="/banner-saren.png"
             alt="Vicepresidencia de la República Bolivariana de Venezuela — Servicio Autónomo de Registros y Notarías"
-            className="w-36 sm:w-52 md:w-56 xl:w-80 h-auto object-contain"
+            className="w-40 sm:w-56 md:w-72 lg:w-96 xl:w-[440px] h-auto object-contain"
           />
         </div>
       </div>
