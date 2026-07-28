@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { csvDateStamp, downloadCsv } from '../utils/exportCsv';
+import PriorityConditionSelector from '../components/PriorityConditionSelector';
 
 const VENEZUELA_STATES = [
   'Amazonas', 'Anzoátegui', 'Apure', 'Aragua', 'Barinas', 'Bolívar', 
@@ -1191,7 +1192,16 @@ export default function Residents({ token }) {
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Parentesco o rol familiar</label>
-                    <input value={personIntake.rol_familiar} onChange={e => setPersonIntake(current => ({ ...current, rol_familiar: e.target.value }))} placeholder="Jefe(a), madre/padre, representante..." className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs" />
+                    <select value={personIntake.rol_familiar} onChange={e => setPersonIntake(current => ({ ...current, rol_familiar: e.target.value }))} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs">
+                      <option value="">Seleccione una opción</option>
+                      {personIntake.rol_familiar && !['Jefe(a) de hogar / representante', 'Madre/Padre', 'Representante', 'Otro'].includes(personIntake.rol_familiar) && (
+                        <option value={personIntake.rol_familiar}>{personIntake.rol_familiar} (registrado previamente)</option>
+                      )}
+                      <option value="Jefe(a) de hogar / representante">Jefe(a) de hogar</option>
+                      <option value="Madre/Padre">Madre/Padre</option>
+                      <option value="Representante">Representante</option>
+                      <option value="Otro">Otro</option>
+                    </select>
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Red de apoyo externa</label>
@@ -1201,9 +1211,11 @@ export default function Residents({ token }) {
                       <option value="Por verificar">Por verificar</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Condición prioritaria</label>
-                    <input value={personIntake.condicion_prioritaria} onChange={e => setPersonIntake(current => ({ ...current, condicion_prioritaria: e.target.value }))} placeholder="NNA, adulto mayor, discapacidad..." className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs" />
+                  <div className="sm:col-span-2">
+                    <PriorityConditionSelector
+                      value={personIntake.condicion_prioritaria}
+                      onChange={value => setPersonIntake(current => ({ ...current, condicion_prioritaria: value }))}
+                    />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Evaluación médica requerida</label>
@@ -1230,7 +1242,18 @@ export default function Residents({ token }) {
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Ayuda técnica requerida</label>
-                    <input value={personIntake.ayuda_tecnica} onChange={e => setPersonIntake(current => ({ ...current, ayuda_tecnica: e.target.value }))} placeholder="Bastón, silla de ruedas, lentes..." className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs" />
+                    <select value={personIntake.ayuda_tecnica} onChange={e => setPersonIntake(current => ({ ...current, ayuda_tecnica: e.target.value }))} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs">
+                      <option value="">No requerida</option>
+                      {personIntake.ayuda_tecnica && !['Bastón', 'Silla ruedas', 'Andadera', 'Lentes', 'Audífono', 'Otra'].includes(personIntake.ayuda_tecnica) && (
+                        <option value={personIntake.ayuda_tecnica}>{personIntake.ayuda_tecnica} (registrado previamente)</option>
+                      )}
+                      <option value="Bastón">Bastón</option>
+                      <option value="Silla ruedas">Silla de ruedas</option>
+                      <option value="Andadera">Andadera</option>
+                      <option value="Lentes">Lentes</option>
+                      <option value="Audífono">Audífono</option>
+                      <option value="Otra">Otra</option>
+                    </select>
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Apoyo psicosocial</label>

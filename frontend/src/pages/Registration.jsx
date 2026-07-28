@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import PriorityConditionSelector from '../components/PriorityConditionSelector';
 
 const VENEZUELA_STATES = [
   'Amazonas', 'Anzoátegui', 'Apure', 'Aragua', 'Barinas', 'Bolívar', 
@@ -947,8 +948,11 @@ export default function Registration({ token }) {
                       </select>
                     </div>
                     <div className="col-span-2">
-                      <label className="text-xs font-bold text-on-surface-variant block mb-1">Condición prioritaria / observación para planilla</label>
-                      <input type="text" value={personIntake.condicion_prioritaria} onChange={e => setPersonIntake(current => ({ ...current, condicion_prioritaria: e.target.value }))} placeholder="Ej. adulto mayor solo, NNA sin documento..." className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none" />
+                      <PriorityConditionSelector
+                        value={personIntake.condicion_prioritaria}
+                        onChange={value => setPersonIntake(current => ({ ...current, condicion_prioritaria: value }))}
+                        label="Condición prioritaria / observación para planilla"
+                      />
                     </div>
                     <div>
                       <label className="text-xs font-bold text-on-surface-variant block mb-1">Menores de edad a cargo</label>

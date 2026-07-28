@@ -1,5 +1,6 @@
 import React from 'react';
 import { normalizeFamilyIntake } from '../utils/familyIntakeData';
+import { PRIORITY_CONDITIONS } from './PriorityConditionSelector';
 
 const inputClass = 'mt-1 w-full bg-surface-container-low border border-outline-variant rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20';
 
@@ -22,10 +23,13 @@ function TextArea({ label, value, onChange, placeholder = '', span = 'md:col-spa
 }
 
 function Select({ label, value, onChange, options, span = '' }) {
+  const hasLegacyValue = Boolean(value) && !options.includes(value);
   return (
     <label className={`text-[10px] font-bold text-on-surface-variant ${span}`}>
       {label}
       <select value={value || ''} onChange={event => onChange(event.target.value)} className={inputClass}>
+        {!value && <option value="">Seleccione una opción</option>}
+        {hasLegacyValue && <option value={value}>{value} (registrado previamente)</option>}
         {options.map(option => <option key={option} value={option}>{option}</option>)}
       </select>
     </label>
@@ -49,6 +53,65 @@ function CheckGroup({ label, values, options, onChange, span = 'md:col-span-2' }
         ))}
       </div>
     </fieldset>
+  );
+}
+
+const EMPTY_FOLLOWUP = {
+  fecha: '',
+  tipo: '',
+  motivo: '',
+  instancia: '',
+  responsable: '',
+  estatus: ''
+};
+
+function FollowupEditor({ value, onChange }) {
+  const savedRows = Array.isArray(value) ? value : [];
+  const rows = savedRows.length ? savedRows : [EMPTY_FOLLOWUP];
+  const updateRow = (index, field, nextValue) => {
+    const nextRows = rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: nextValue } : row);
+    onChange(nextRows);
+  };
+  const addRow = () => {
+    if (rows.length < 5) onChange([...rows, { ...EMPTY_FOLLOWUP }]);
+  };
+  const removeRow = index => {
+    const nextRows = rows.filter((_, rowIndex) => rowIndex !== index);
+    onChange(nextRows.length ? nextRows : []);
+  };
+
+  return (
+    <div className="md:col-span-2 space-y-3">
+      <p className="text-[10px] leading-relaxed text-on-surface-variant">
+        Complete una fila por cada atención. Los nombres de los campos permanecen visibles mientras escribe.
+      </p>
+      {rows.map((row, index) => (
+        <div key={index} className="rounded-xl border border-outline-variant bg-surface-container-low/40 p-3">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <span className="text-[10px] font-extrabold uppercase tracking-wide text-primary">Atención {index + 1}</span>
+            {rows.length > 1 && (
+              <button type="button" onClick={() => removeRow(index)} className="text-[10px] font-bold text-error hover:underline">
+                Eliminar fila
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <Field label="Fecha" type="date" value={row.fecha} onChange={nextValue => updateRow(index, 'fecha', nextValue)} />
+            <Field label="Tipo de atención" value={row.tipo} onChange={nextValue => updateRow(index, 'tipo', nextValue)} placeholder="Ej. orientación, remisión..." />
+            <Field label="Motivo / requerimiento" value={row.motivo} onChange={nextValue => updateRow(index, 'motivo', nextValue)} />
+            <Field label="Instancia destino" value={row.instancia} onChange={nextValue => updateRow(index, 'instancia', nextValue)} />
+            <Field label="Responsable" value={row.responsable} onChange={nextValue => updateRow(index, 'responsable', nextValue)} />
+            <Field label="Estatus / resultado" value={row.estatus} onChange={nextValue => updateRow(index, 'estatus', nextValue)} />
+          </div>
+        </div>
+      ))}
+      {rows.length < 5 && (
+        <button type="button" onClick={addRow} className="inline-flex items-center gap-2 rounded-lg border border-primary px-3 py-2 text-[10px] font-extrabold text-primary hover:bg-primary/5">
+          <span className="material-symbols-outlined text-sm">add</span>
+          Agregar otra atención
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -84,16 +147,7 @@ export default function FamilyIntakeForm({ value, onChange }) {
           label="Alertas presentes"
           values={data.alertas}
           onChange={value => setRoot('alertas', value)}
-          options={[
-            'NNA no acompañado',
-            'NNA separado bajo cuidado de tercero',
-            'NNA sin documento o con documento perdido/dañado',
-            'Adulto mayor solo o sin cuidador',
-            'Persona con discapacidad o movilidad reducida',
-            'Embarazo o lactancia',
-            'Enfermedad crónica o tratamiento permanente',
-            'Riesgo de protección, violencia o situación familiar sensible'
-          ]}
+          options={PRIORITY_CONDITIONS}
         />
       </Section>
 
@@ -108,10 +162,12 @@ export default function FamilyIntakeForm({ value, onChange }) {
         <Select label="Días disponibles" value={data.salud.dias_disponibles} onChange={value => setNested('salud', 'dias_disponibles', value)} options={['Ninguno', '1-3', '4-7', 'Más de 7']} />
         <Field label="Alergias conocidas" value={data.salud.alergias} onChange={value => setNested('salud', 'alergias', value)} />
         <Select label="Requiere refrigeración" value={data.salud.refrigeracion} onChange={value => setNested('salud', 'refrigeracion', value)} options={['No', 'Sí']} />
+        <Field label="Medicamento que requiere refrigeración" value={data.salud.medicamento_refrigerado} onChange={value => setNested('salud', 'medicamento_refrigerado', value)} />
         <Field label="Embarazo: semanas" value={data.salud.embarazo_semanas} onChange={value => setNested('salud', 'embarazo_semanas', value)} />
         <Field label="Lactancia: edad del niño/a" value={data.salud.lactancia_edad} onChange={value => setNested('salud', 'lactancia_edad', value)} />
         <Field label="Discapacidad / movilidad" value={data.salud.discapacidad} onChange={value => setNested('salud', 'discapacidad', value)} />
-        <Field label="Ayuda técnica requerida" value={data.salud.ayuda_tecnica} onChange={value => setNested('salud', 'ayuda_tecnica', value)} />
+        <Select label="Ayuda técnica requerida" value={data.salud.ayuda_tecnica} onChange={value => setNested('salud', 'ayuda_tecnica', value)} options={['Bastón', 'Silla ruedas', 'Andadera', 'Lentes', 'Audífono', 'Otra']} />
+        {data.salud.ayuda_tecnica === 'Otra' && <Field label="Otra ayuda técnica" value={data.salud.ayuda_tecnica_otra} onChange={value => setNested('salud', 'ayuda_tecnica_otra', value)} />}
         <Select label="Apoyo psicosocial" value={data.salud.apoyo_psicosocial} onChange={value => setNested('salud', 'apoyo_psicosocial', value)} options={['No requerido', 'Ansiedad/crisis', 'Duelo/pérdida', 'Otro']} />
         <TextArea label="Observación sanitaria" value={data.salud.observacion} onChange={value => setNested('salud', 'observacion', value)} />
       </Section>
@@ -121,10 +177,13 @@ export default function FamilyIntakeForm({ value, onChange }) {
         <Select label="Urgencia documental" value={data.documental.urgencia} onChange={value => setNested('documental', 'urgencia', value)} options={['Alta', 'Media', 'Baja', 'Por verificar']} />
         <CheckGroup label="Documentos requeridos" values={data.documental.documentos_requeridos} onChange={value => setNested('documental', 'documentos_requeridos', value)} options={['Partida de nacimiento', 'Acta de matrimonio', 'Acta de defunción', 'Documento de propiedad', 'Poder/autorización', 'Documento notariado', 'Registro mercantil']} />
         <Field label="Otros documentos" value={data.documental.otros_documentos} onChange={value => setNested('documental', 'otros_documentos', value)} />
-        <Field label="Persona que requiere el documento (ID o nombre)" value={data.documental.persona_id} onChange={value => setNested('documental', 'persona_id', value)} />
-        <Field label="Motivo" value={data.documental.motivo} onChange={value => setNested('documental', 'motivo', value)} />
-        <Field label="Acción OAC/SAREN" value={data.documental.accion} onChange={value => setNested('documental', 'accion', value)} />
-        <Field label="Órgano o instancia" value={data.documental.organo} onChange={value => setNested('documental', 'organo', value)} />
+        <Field label="Nombre de la persona que requiere el documento" value={data.documental.persona_nombre} onChange={value => setNested('documental', 'persona_nombre', value)} />
+        <Field label="ID del integrante que requiere el documento" value={data.documental.persona_id} onChange={value => setNested('documental', 'persona_id', value)} />
+        <Select label="Motivo" value={data.documental.motivo} onChange={value => setNested('documental', 'motivo', value)} options={['Pérdida por desastre', 'Daño físico', 'Trámite pendiente', 'Otro']} />
+        {data.documental.motivo === 'Otro' && <Field label="Otro motivo" value={data.documental.motivo_otro} onChange={value => setNested('documental', 'motivo_otro', value)} />}
+        <Select label="Acción OAC/SAREN" value={data.documental.accion} onChange={value => setNested('documental', 'accion', value)} options={['Orientación', 'Registro de requerimiento', 'Remisión a registro/notaría', 'Gestión interna']} />
+        <Select label="Órgano o instancia" value={data.documental.organo} onChange={value => setNested('documental', 'organo', value)} options={['SAREN', 'Registro Civil', 'SAIME', 'CPNNA', 'Otro']} />
+        {data.documental.organo === 'Otro' && <Field label="Otro órgano o instancia" value={data.documental.organo_otro} onChange={value => setNested('documental', 'organo_otro', value)} />}
         <Select label="Estatus de gestión" value={data.documental.estatus_gestion} onChange={value => setNested('documental', 'estatus_gestion', value)} options={['Pendiente', 'En proceso', 'Atendido', 'Cerrado']} />
         <Field label="Fecha compromiso" type="date" value={data.documental.fecha_compromiso} onChange={value => setNested('documental', 'fecha_compromiso', value)} />
         <Field label="Responsable de seguimiento" value={data.documental.responsable} onChange={value => setNested('documental', 'responsable', value)} />
@@ -140,7 +199,8 @@ export default function FamilyIntakeForm({ value, onChange }) {
         <Select label="Inspección técnica" value={data.vivienda.inspeccion} onChange={value => setNested('vivienda', 'inspeccion', value)} options={['No realizada', 'Pendiente', 'Realizada']} />
         <Field label="Inspección realizada por" value={data.vivienda.inspeccion_por} onChange={value => setNested('vivienda', 'inspeccion_por', value)} />
         <Field label="Fecha de inspección" type="date" value={data.vivienda.fecha_inspeccion} onChange={value => setNested('vivienda', 'fecha_inspeccion', value)} />
-        <Field label="Tenencia de vivienda" value={data.vivienda.tenencia} onChange={value => setNested('vivienda', 'tenencia', value)} placeholder="Propia, alquilada, familiar, prestada..." />
+        <Select label="Tenencia de vivienda" value={data.vivienda.tenencia} onChange={value => setNested('vivienda', 'tenencia', value)} options={['Propia', 'Alquilada', 'Familiar', 'Prestada', 'Otra']} />
+        {data.vivienda.tenencia === 'Otra' && <Field label="Otra tenencia de vivienda" value={data.vivienda.tenencia_otra} onChange={value => setNested('vivienda', 'tenencia_otra', value)} />}
         <Select label="Puede retornar temporalmente" value={data.vivienda.retorno_temporal} onChange={value => setNested('vivienda', 'retorno_temporal', value)} options={['No', 'Sí', 'Por determinar', 'Requiere evaluación técnica']} />
         <CheckGroup label="Pérdidas críticas" values={data.vivienda.perdidas} onChange={value => setNested('vivienda', 'perdidas', value)} options={['Documentos', 'Medicinas', 'Ropa/calzado', 'Enseres', 'Herramientas de trabajo', 'Ayuda técnica']} />
         <TextArea label="Observación habitacional" value={data.vivienda.observacion} onChange={value => setNested('vivienda', 'observacion', value)} />
@@ -152,7 +212,7 @@ export default function FamilyIntakeForm({ value, onChange }) {
 
       <Section number="8" title="Diagnóstico socioeconómico básico">
         <Field label="Ocupación / oficio principal" value={data.socioeconomico.ocupacion} onChange={value => setNested('socioeconomico', 'ocupacion', value)} />
-        <Field label="Situación laboral actual" value={data.socioeconomico.situacion_laboral} onChange={value => setNested('socioeconomico', 'situacion_laboral', value)} />
+        <Select label="Situación laboral actual" value={data.socioeconomico.situacion_laboral} onChange={value => setNested('socioeconomico', 'situacion_laboral', value)} options={['Activa', 'Suspendida', 'Perdió actividad', 'Informal', 'Sin ingreso']} />
         <CheckGroup label="Fuente de ingreso antes del evento" values={data.socioeconomico.fuente_antes} onChange={value => setNested('socioeconomico', 'fuente_antes', value)} options={['Sueldo', 'Cuenta propia', 'Pensión', 'Bono', 'Remesa', 'Otro']} />
         <Select label="Fuente de ingreso actual" value={data.socioeconomico.fuente_actual} onChange={value => setNested('socioeconomico', 'fuente_actual', value)} options={['Mantiene', 'Parcial', 'Sin ingreso', 'Por verificar']} />
         <Select label="Rango de ingreso mensual aproximado" value={data.socioeconomico.rango_ingreso} onChange={value => setNested('socioeconomico', 'rango_ingreso', value)} options={['Sin ingreso', 'Eventual', 'Bajo', 'Medio', 'NR']} />
@@ -169,12 +229,7 @@ export default function FamilyIntakeForm({ value, onChange }) {
       </Section>
 
       <Section number="10" title="Acciones y seguimiento">
-        <TextArea
-          label="Registros de seguimiento"
-          value={data.seguimientos}
-          onChange={value => setRoot('seguimientos', value)}
-          placeholder="Una línea por atención: Fecha | Tipo | Motivo | Instancia destino | Responsable | Estatus/resultado"
-        />
+        <FollowupEditor value={data.seguimientos} onChange={value => setRoot('seguimientos', value)} />
       </Section>
 
       <Section number="11" title="Observaciones finales del profesional OAC">
