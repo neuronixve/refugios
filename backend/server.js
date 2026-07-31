@@ -1800,7 +1800,22 @@ app.delete('/api/refugios/:refugio_id/menus', authenticateToken, async (req, res
 
 app.get('/api/refugios/:refugio_id/meals/attendance', authenticateToken, async (req, res) => {
   const { refugio_id } = req.params;
+  const { start_date, end_date } = req.query;
   try {
+    const params = [refugio_id];
+    let dateFilter = 'AND ma.meal_date = CURRENT_DATE';
+    if (start_date || end_date) {
+      dateFilter = '';
+      if (start_date) {
+        params.push(start_date);
+        dateFilter += ` AND ma.meal_date >= $${params.length}`;
+      }
+      if (end_date) {
+        params.push(end_date);
+        dateFilter += ` AND ma.meal_date <= $${params.length}`;
+      }
+    }
+
     const result = await db.query(`
       SELECT ma.*,
         COALESCE(d.first_name, u.name) as first_name,
@@ -1812,9 +1827,9 @@ app.get('/api/refugios/:refugio_id/meals/attendance', authenticateToken, async (
       FROM meal_attendance ma
       LEFT JOIN damnificados d ON ma.resident_id = d.id
       LEFT JOIN users u ON ma.staff_id = u.id
-      WHERE ma.refugio_id = $1 AND ma.meal_date = CURRENT_DATE
+      WHERE ma.refugio_id = $1 ${dateFilter}
       ORDER BY ma.attended_at DESC
-    `, [refugio_id]);
+    `, params);
     res.json(result.rows);
   } catch (err) {
     console.error(err);

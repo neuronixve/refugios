@@ -867,7 +867,7 @@ export default function Residents({ token }) {
           <div className="bg-surface rounded-2xl border border-outline-variant p-6 w-full max-w-2xl shadow-lg max-h-[90vh] overflow-y-auto custom-scrollbar animate-in fade-in zoom-in-95 duration-200">
             
             <div className="flex justify-between items-start mb-6 border-b border-outline-variant pb-3">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-5">
                 {(() => {
                   let meta = {};
                   try {
@@ -876,11 +876,11 @@ export default function Residents({ token }) {
                     meta = {};
                   }
                   return (
-                    <div className="w-12 h-12 rounded-full border border-outline-variant bg-surface-container overflow-hidden flex items-center justify-center">
+                    <div className="w-28 h-32 sm:w-32 sm:h-36 rounded-2xl border-2 border-primary/20 bg-surface-container overflow-hidden flex items-center justify-center shadow-sm shrink-0">
                       {meta.photo ? (
                         <img src={meta.photo} alt="Ficha Avatar" className="w-full h-full object-cover" />
                       ) : (
-                        <span className="material-symbols-outlined text-xl text-on-surface-variant">person</span>
+                        <span className="material-symbols-outlined text-5xl text-on-surface-variant">person</span>
                       )}
                     </div>
                   );
