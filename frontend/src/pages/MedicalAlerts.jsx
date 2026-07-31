@@ -58,14 +58,19 @@ export default function MedicalAlerts({ token }) {
         setResidents(data.filter(r => r.status === 'Activo'));
       }
 
-      const resInv = await fetch(`${API_BASE}/refugios/${refugioId}/inventory`, {
+      const resInv = await fetch(`${API_BASE}/refugios/${refugioId}/health-inventory`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (resInv.ok) {
-        setInventory(await resInv.json());
+        const healthData = await resInv.json();
+        setInventory(Array.isArray(healthData.items) ? healthData.items : []);
+      } else {
+        const data = await resInv.json().catch(() => ({}));
+        throw new Error(data.error || 'No se pudo cargar el inventario de salud.');
       }
     } catch (err) {
       console.error(err);
+      setError(err.message || 'Error al cargar las alertas médicas.');
     } finally {
       setLoading(false);
     }
@@ -124,16 +129,18 @@ export default function MedicalAlerts({ token }) {
 
   const metrics = calculateMetrics();
 
-  // Helper to fetch medicine stock
-  const getMedicineStock = (itemName) => {
-    const item = inventory.find(i => i.item_name.toLowerCase().includes(itemName.toLowerCase()));
-    return item ? item.quantity : 0;
-  };
+  const criticalInventory = inventory.filter(item =>
+    (parseFloat(item.quantity) || 0) <= (parseFloat(item.min_threshold) || 0)
+  );
+  const availableInventory = inventory.filter(item =>
+    (parseFloat(item.quantity) || 0) > (parseFloat(item.min_threshold) || 0)
+  );
 
-  // Inventory Critical Stocks
-  const insulinaStock = getMedicineStock('Insulina');
-  const formulaStock = getMedicineStock('Fórmula') || getMedicineStock('Formula') || 8;
-  const panalesStock = getMedicineStock('Pañales') || getMedicineStock('Pañal') || 45;
+  const suggestedRequest = item => {
+    const qty = parseFloat(item.quantity) || 0;
+    const min = parseFloat(item.min_threshold) || 0;
+    return Math.max((min > 0 ? min * 2 : 1) - qty, 1);
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -144,7 +151,7 @@ export default function MedicalAlerts({ token }) {
           <p className="text-xs text-on-surface-variant mt-1.5 font-mono">Monitoreo de desabastecimiento de medicinas esenciales y censo crítico.</p>
         </div>
         <button 
-          onClick={() => navigate(`/refugio/${refugioId}/inventario`)}
+          onClick={() => navigate(`/refugio/${refugioId}/medico/inventario`)}
           className="px-5 py-3 bg-[#0b2347] text-white font-bold rounded-xl text-xs hover:opacity-95 transition-all flex items-center gap-2 cursor-pointer shadow-xs"
         >
           <span className="material-symbols-outlined text-sm">tune</span>
@@ -174,88 +181,56 @@ export default function MedicalAlerts({ token }) {
               Suministros Críticos (Acción Inmediata)
             </span>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              
-              {/* Insulina Card */}
-              <div className="bg-surface-container-lowest border-l-4 border-l-error border border-outline-variant/50 rounded-2xl p-5 flex flex-col justify-between shadow-2xs">
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <div className="w-8 h-8 bg-error/15 text-error rounded-lg flex items-center justify-center">
-                      <span className="material-symbols-outlined text-sm">vaccines</span>
+              {criticalInventory.map(item => {
+                const qty = parseFloat(item.quantity) || 0;
+                const min = parseFloat(item.min_threshold) || 0;
+                const empty = qty <= 0;
+                return (
+                  <div key={item.id} className={`bg-surface-container-lowest border-l-4 ${empty ? 'border-l-error' : 'border-l-amber-600'} border border-outline-variant/50 rounded-2xl p-5 flex flex-col justify-between shadow-2xs`}>
+                    <div>
+                      <div className="flex justify-between items-center mb-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${empty ? 'bg-error/15 text-error' : 'bg-amber-600/15 text-amber-700'}`}>
+                          <span className="material-symbols-outlined text-sm">medical_services</span>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded font-black uppercase text-[8px] ${empty ? 'bg-error/15 text-error' : 'bg-amber-600/15 text-amber-700'}`}>
+                          {empty ? 'Sin stock' : 'Bajo umbral'}
+                        </span>
+                      </div>
+                      <h4 className="text-xs font-black text-on-surface uppercase">{item.item_name}</h4>
+                      <p className="text-[9px] text-on-surface-variant font-medium mt-1 leading-normal">
+                        Existencia real: {qty} {item.unit || 'Unidades'}. Umbral configurado: {min}.
+                      </p>
                     </div>
-                    <span className="px-2 py-0.5 rounded font-black uppercase text-[8px] bg-error/15 text-error">
-                      Crítico
-                    </span>
-                  </div>
-                  <h4 className="text-xs font-black text-on-surface uppercase">Insulina Rápida</h4>
-                  <p className="text-[9px] text-on-surface-variant font-medium mt-1 leading-normal">
-                    Reserva operativa para menos de 3 días. Riesgo vital para {metrics.cronicos} pacientes crónicos.
-                  </p>
-                </div>
-                <div className="flex justify-between items-end mt-4 pt-3 border-t border-outline-variant/30">
-                  <span className="text-md font-black text-error font-mono">{insulinaStock || 12} viales</span>
-                  <button 
-                    onClick={() => handleRequestWarehouse('Insulina Rápida', 50)}
-                    className="text-[9px] font-black text-primary hover:underline uppercase"
-                  >
-                    Solicitar al Almacén
-                  </button>
-                </div>
-              </div>
-
-              {/* Formula Card */}
-              <div className="bg-surface-container-lowest border-l-4 border-l-error border border-outline-variant/50 rounded-2xl p-5 flex flex-col justify-between shadow-2xs">
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <div className="w-8 h-8 bg-error/15 text-error rounded-lg flex items-center justify-center">
-                      <span className="material-symbols-outlined text-sm">child_care</span>
+                    <div className="flex justify-between items-end mt-4 pt-3 border-t border-outline-variant/30">
+                      <span className={`text-md font-black font-mono ${empty ? 'text-error' : 'text-amber-700'}`}>{qty} {item.unit || 'Unidades'}</span>
+                      <button
+                        onClick={() => handleRequestWarehouse(item.item_name, suggestedRequest(item))}
+                        className="text-[9px] font-black text-primary hover:underline uppercase"
+                      >
+                        Solicitar al Almacén
+                      </button>
                     </div>
-                    <span className="px-2 py-0.5 rounded font-black uppercase text-[8px] bg-error/15 text-error">
-                      Crítico
-                    </span>
                   </div>
-                  <h4 className="text-xs font-black text-on-surface uppercase">Fórmula Infantil Etapa 1</h4>
-                  <p className="text-[9px] text-on-surface-variant font-medium mt-1 leading-normal">
-                    Suministro para menos de 24 horas. Afecta directamente al crecimiento de {metrics.infantes} neonatos.
-                  </p>
-                </div>
-                <div className="flex justify-between items-end mt-4 pt-3 border-t border-outline-variant/30">
-                  <span className="text-md font-black text-error font-mono">{formulaStock} latas</span>
-                  <button 
-                    onClick={() => handleRequestWarehouse('Fórmula Infantil Etapa 1', 30)}
-                    className="text-[9px] font-black text-primary hover:underline uppercase"
-                  >
-                    Solicitar al Almacén
-                  </button>
-                </div>
-              </div>
-
-              {/* Pañales Card */}
-              <div className="bg-surface-container-lowest border-l-4 border-l-amber-600 border border-outline-variant/50 rounded-2xl p-5 flex flex-col justify-between shadow-2xs">
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <div className="w-8 h-8 bg-amber-600/15 text-amber-600 rounded-lg flex items-center justify-center">
-                      <span className="material-symbols-outlined text-sm">baby_changing_station</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded font-black uppercase text-[8px] bg-amber-600/15 text-amber-600">
-                      Bajo
-                    </span>
+                );
+              })}
+              {inventory.length === 0 && (
+                <div className="md:col-span-3 bg-amber-600/5 border border-amber-600/25 rounded-2xl p-6 flex items-center gap-3 text-amber-800">
+                  <span className="material-symbols-outlined">inventory_2</span>
+                  <div>
+                    <p className="text-xs font-black uppercase">Inventario médico sin renglones</p>
+                    <p className="text-[10px] font-medium mt-1">Registre los insumos recibidos por el Servicio Médico para activar el monitoreo de existencias y umbrales.</p>
                   </div>
-                  <h4 className="text-xs font-black text-on-surface uppercase">Pañales Talla M/L</h4>
-                  <p className="text-[9px] text-on-surface-variant font-medium mt-1 leading-normal">
-                    Stock bajo que afecta al 65% del segmento de 0 a 2 años. Reposición necesaria.
-                  </p>
                 </div>
-                <div className="flex justify-between items-end mt-4 pt-3 border-t border-outline-variant/30">
-                  <span className="text-md font-black text-amber-700 font-mono">{panalesStock} packs</span>
-                  <button 
-                    onClick={() => handleRequestWarehouse('Pañales Talla M/L', 100)}
-                    className="text-[9px] font-black text-primary hover:underline uppercase"
-                  >
-                    Solicitar al Almacén
-                  </button>
+              )}
+              {inventory.length > 0 && criticalInventory.length === 0 && (
+                <div className="md:col-span-3 bg-success/5 border border-success/25 rounded-2xl p-6 flex items-center gap-3 text-success">
+                  <span className="material-symbols-outlined">check_circle</span>
+                  <div>
+                    <p className="text-xs font-black uppercase">Sin alertas de inventario médico</p>
+                    <p className="text-[10px] font-medium mt-1">Todos los insumos registrados están por encima de sus umbrales.</p>
+                  </div>
                 </div>
-              </div>
-
+              )}
             </div>
           </div>
 
@@ -308,50 +283,50 @@ export default function MedicalAlerts({ token }) {
               </h3>
 
               <div className="flex flex-col gap-3">
-                
-                {/* Alert 1 */}
-                <div className="p-3.5 bg-error/5 border border-error/25 rounded-xl flex items-start gap-3">
-                  <span className="material-symbols-outlined text-sm text-error mt-0.5">warning</span>
-                  <div className="flex-1 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="font-black text-error uppercase text-[8px] tracking-wider">Fórmula Infantil - Agotamiento</span>
-                      <span className="px-1.5 py-0.5 rounded font-black text-[7px] bg-error/15 text-error uppercase">Crítico</span>
+                {criticalInventory.slice(0, 5).map(item => {
+                  const qty = parseFloat(item.quantity) || 0;
+                  return (
+                    <div key={item.id} className={`${qty <= 0 ? 'bg-error/5 border-error/25' : 'bg-amber-600/5 border-amber-600/25'} p-3.5 border rounded-xl flex items-start gap-3`}>
+                      <span className={`material-symbols-outlined text-sm mt-0.5 ${qty <= 0 ? 'text-error' : 'text-amber-700'}`}>warning</span>
+                      <div className="flex-1 text-xs">
+                        <div className="flex justify-between items-center gap-2">
+                          <span className={`font-black uppercase text-[8px] tracking-wider ${qty <= 0 ? 'text-error' : 'text-amber-700'}`}>{item.item_name}</span>
+                          <span className={`px-1.5 py-0.5 rounded font-black text-[7px] uppercase ${qty <= 0 ? 'bg-error/15 text-error' : 'bg-amber-600/15 text-amber-700'}`}>
+                            {qty <= 0 ? 'Agotado' : 'Crítico'}
+                          </span>
+                        </div>
+                        <p className="text-[9px] text-on-surface-variant mt-1 leading-normal">
+                          Stock {qty} {item.unit || 'Unidades'}; mínimo operativo {parseFloat(item.min_threshold) || 0}.
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-[9px] text-on-surface-variant mt-1 leading-normal">Proyección actual indica rotura de stock en menos de 12 horas si no hay reabastecimiento.</p>
-                  </div>
-                </div>
-
-                {/* Alert 2 */}
-                <div className="p-3.5 bg-amber-600/5 border border-amber-600/25 rounded-xl flex items-start gap-3">
-                  <span className="material-symbols-outlined text-sm text-amber-600 mt-0.5">error_outline</span>
-                  <div className="flex-1 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="font-black text-amber-700 uppercase text-[8px] tracking-wider">Pañales Talla M - Nivel Seguridad</span>
-                      <span className="px-1.5 py-0.5 rounded font-black text-[7px] bg-amber-600/15 text-amber-600 uppercase">Bajo</span>
+                  );
+                })}
+                {inventory.length === 0 && (
+                  <div className="p-3.5 bg-amber-600/5 border border-amber-600/25 rounded-xl flex items-start gap-3">
+                    <span className="material-symbols-outlined text-sm text-amber-700 mt-0.5">inventory_2</span>
+                    <div className="flex-1 text-xs">
+                      <span className="font-black text-amber-700 uppercase text-[8px] tracking-wider">Monitoreo pendiente de configuración</span>
+                      <p className="text-[9px] text-on-surface-variant mt-1 leading-normal">No existen insumos registrados en el depósito médico.</p>
                     </div>
-                    <p className="text-[9px] text-on-surface-variant mt-1 leading-normal">Stock por debajo del umbral del 20%. Sugerimos iniciar orden de compra hoy.</p>
                   </div>
-                </div>
-
-                {/* Alert 3 */}
-                <div className="p-3.5 bg-success/5 border border-success/25 rounded-xl flex items-start gap-3">
-                  <span className="material-symbols-outlined text-sm text-success mt-0.5">check_circle</span>
-                  <div className="flex-1 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="font-black text-success uppercase text-[8px] tracking-wider">Kit de Higiene - Nivel Estable</span>
-                      <span className="px-1.5 py-0.5 rounded font-black text-[7px] bg-success/15 text-success uppercase">Óptimo</span>
+                )}
+                {inventory.length > 0 && criticalInventory.length === 0 && (
+                  <div className="p-3.5 bg-success/5 border border-success/25 rounded-xl flex items-start gap-3">
+                    <span className="material-symbols-outlined text-sm text-success mt-0.5">check_circle</span>
+                    <div className="flex-1 text-xs">
+                      <span className="font-black text-success uppercase text-[8px] tracking-wider">Inventario médico estable</span>
+                      <p className="text-[9px] text-on-surface-variant mt-1 leading-normal">{availableInventory.length} insumos por encima de su umbral.</p>
                     </div>
-                    <p className="text-[9px] text-on-surface-variant mt-1 leading-normal">Suministro garantizado para los próximos 14 días según censo actual.</p>
                   </div>
-                </div>
-
+                )}
               </div>
 
               <button 
-                onClick={() => navigate(`/refugio/${refugioId}/reportes`)}
+                onClick={() => navigate(`/refugio/${refugioId}/medico/inventario`)}
                 className="w-full py-2.5 bg-surface-container-low border border-outline-variant/60 text-[#0b2347] font-black rounded-xl text-[10px] hover:bg-surface-container-high transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
               >
-                Ver historial de alertas
+                Revisar inventario y umbrales
               </button>
             </div>
 

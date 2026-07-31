@@ -1476,6 +1476,115 @@ app.put('/api/refugios/:refugio_id/beds/space', authenticateToken, async (req, r
 });
 
 // --- RUTAS DE INVENTARIO ---
+const HEALTH_DEPOSITO_FILTER = `(
+  LOWER(COALESCE(d.name, '')) LIKE '%médico%'
+  OR LOWER(COALESCE(d.name, '')) LIKE '%medico%'
+  OR LOWER(COALESCE(d.name, '')) LIKE '%salud%'
+)`;
+
+async function getOrCreateHealthDeposito(queryable, refugioId) {
+  const existing = await queryable.query(
+    `SELECT d.*
+     FROM depositos d
+     WHERE d.refugio_id = $1
+       AND (
+         LOWER(COALESCE(d.name, '')) LIKE '%médico%'
+         OR LOWER(COALESCE(d.name, '')) LIKE '%medico%'
+         OR LOWER(COALESCE(d.name, '')) LIKE '%salud%'
+       )
+     ORDER BY d.id ASC
+     LIMIT 1`,
+    [parseInt(refugioId)]
+  );
+  if (existing.rows.length > 0) return existing.rows[0];
+
+  const created = await queryable.query(
+    `INSERT INTO depositos (refugio_id, name, description, capacity_percent)
+     VALUES ($1, 'Servicio Médico', 'Depósito local del servicio médico para insumos de salud', 100)
+     RETURNING *`,
+    [parseInt(refugioId)]
+  );
+  return created.rows[0];
+}
+
+const requireMedicalInventoryWriter = (req, res, next) => {
+  if (['admin', 'gerente', 'medico'].includes(req.user?.role)) return next();
+  return res.status(403).json({ error: 'No posee permisos para modificar el inventario de salud.' });
+};
+
+const denyMedicalGeneralInventoryWrite = (req, res, next) => {
+  if (req.user?.role !== 'medico') return next();
+  return res.status(403).json({
+    error: 'El personal médico debe operar exclusivamente mediante el inventario de salud.'
+  });
+};
+
+// Inventario aislado del Servicio Médico. El depósito se resuelve siempre en el servidor,
+// evitando que el cliente pueda leer o modificar renglones del almacén general.
+app.get('/api/refugios/:refugio_id/health-inventory', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  try {
+    const deposito = await getOrCreateHealthDeposito(db, refugio_id);
+    const result = await db.query(
+      `SELECT i.*, d.name AS deposito_name
+       FROM inventory i
+       JOIN depositos d ON i.deposito_id = d.id
+       WHERE i.refugio_id = $1 AND i.deposito_id = $2
+       ORDER BY i.item_name ASC`,
+      [parseInt(refugio_id), deposito.id]
+    );
+    res.json({ deposito, items: result.rows });
+  } catch (err) {
+    console.error('Error al obtener inventario de salud:', err);
+    res.status(500).json({ error: 'Error al obtener inventario de salud.' });
+  }
+});
+
+app.post('/api/refugios/:refugio_id/health-inventory', authenticateToken, requireMedicalInventoryWriter, async (req, res) => {
+  const { refugio_id } = req.params;
+  const { id, item_name, category, quantity, min_threshold, unit } = req.body;
+  if (!item_name || quantity === undefined) {
+    return res.status(400).json({ error: 'Insumo y cantidad son requeridos.' });
+  }
+
+  try {
+    const deposito = await getOrCreateHealthDeposito(db, refugio_id);
+    const qtyVal = parseFloat(quantity) || 0;
+    const minVal = parseFloat(min_threshold) || 0;
+    const status = qtyVal === 0 ? 'Sin Stock' : (qtyVal <= minVal ? 'Stock Crítico' : 'Stock Suficiente');
+    let result;
+
+    if (id) {
+      result = await db.query(
+        `UPDATE inventory
+         SET item_name = $1, category = $2, quantity = $3, min_threshold = $4,
+             unit = $5, status = $6, updated_at = NOW()
+         WHERE id = $7 AND refugio_id = $8 AND deposito_id = $9
+         RETURNING *`,
+        [item_name, category || 'Medicinas', qtyVal, minVal, unit || 'Unidades', status,
+          parseInt(id), parseInt(refugio_id), deposito.id]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'El insumo no pertenece al inventario de salud de esta sede.' });
+      }
+    } else {
+      result = await db.query(
+        `INSERT INTO inventory
+         (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *`,
+        [parseInt(refugio_id), item_name, category || 'Medicinas', qtyVal, minVal,
+          unit || 'Unidades', status, deposito.id]
+      );
+    }
+
+    res.status(id ? 200 : 201).json({ ...result.rows[0], deposito_name: deposito.name });
+  } catch (err) {
+    console.error('Error al guardar inventario de salud:', err);
+    res.status(500).json({ error: 'Error al guardar inventario de salud.' });
+  }
+});
+
 app.get('/api/refugios/:refugio_id/inventory', authenticateToken, async (req, res) => {
   const { refugio_id } = req.params;
   try {
@@ -1490,7 +1599,7 @@ app.get('/api/refugios/:refugio_id/inventory', authenticateToken, async (req, re
   }
 });
 
-app.post('/api/refugios/:refugio_id/inventory', authenticateToken, async (req, res) => {
+app.post('/api/refugios/:refugio_id/inventory', authenticateToken, denyMedicalGeneralInventoryWrite, async (req, res) => {
   const { refugio_id } = req.params;
   const { id, item_name, category, quantity, min_threshold, unit, deposito_id } = req.body;
   if (!item_name || !category || quantity === undefined) {
@@ -1528,7 +1637,7 @@ app.post('/api/refugios/:refugio_id/inventory', authenticateToken, async (req, r
   }
 });
 
-app.put('/api/inventory/:id', authenticateToken, async (req, res) => {
+app.put('/api/inventory/:id', authenticateToken, denyMedicalGeneralInventoryWrite, async (req, res) => {
   const { id } = req.params;
   const { quantity } = req.body;
   try {
@@ -1549,7 +1658,7 @@ app.put('/api/inventory/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/refugios/:refugio_id/deliveries', authenticateToken, async (req, res) => {
+app.post('/api/refugios/:refugio_id/deliveries', authenticateToken, denyMedicalGeneralInventoryWrite, async (req, res) => {
   const { refugio_id } = req.params;
   const { resident_id, item_name, quantity } = req.body;
   if (!resident_id || !item_name || !quantity) {
@@ -1563,9 +1672,22 @@ app.post('/api/refugios/:refugio_id/deliveries', authenticateToken, async (req, 
       [refugio_id, resident_id, item_name, quantity, req.user.id]
     );
 
-    // Restar de inventario si existe
+    // Restar únicamente del almacén general. Las entregas médicas tienen su propio
+    // endpoint transaccional y nunca deben descontar del depósito de salud.
     await db.query(
-      "UPDATE inventory SET quantity = GREATEST(0, quantity - $1), status = CASE WHEN GREATEST(0, quantity - $1) = 0 THEN 'Sin Stock' WHEN GREATEST(0, quantity - $1) <= min_threshold THEN 'Stock Crítico' ELSE 'Stock Suficiente' END WHERE refugio_id = $2 AND item_name = $3",
+      `UPDATE inventory i
+       SET quantity = GREATEST(0, i.quantity - $1),
+           status = CASE
+             WHEN GREATEST(0, i.quantity - $1) = 0 THEN 'Sin Stock'
+             WHEN GREATEST(0, i.quantity - $1) <= i.min_threshold THEN 'Stock Crítico'
+             ELSE 'Stock Suficiente'
+           END,
+           updated_at = NOW()
+       WHERE i.refugio_id = $2 AND i.item_name = $3
+         AND NOT EXISTS (
+           SELECT 1 FROM depositos d
+           WHERE d.id = i.deposito_id AND ${HEALTH_DEPOSITO_FILTER}
+         )`,
       [quantity, refugio_id, item_name]
     );
 
@@ -1623,7 +1745,7 @@ app.get('/api/refugios/:refugio_id/medication-deliveries', authenticateToken, as
   }
 });
 
-app.post('/api/refugios/:refugio_id/medication-deliveries', authenticateToken, async (req, res) => {
+app.post('/api/refugios/:refugio_id/medication-deliveries', authenticateToken, requireMedicalInventoryWriter, async (req, res) => {
   const { refugio_id } = req.params;
   const {
     resident_id,
@@ -1694,7 +1816,11 @@ app.post('/api/refugios/:refugio_id/medication-deliveries', authenticateToken, a
     }
 
     const inventoryRes = await client.query(
-      'SELECT id, item_name, quantity, min_threshold, unit FROM inventory WHERE id = $1 AND refugio_id = $2 FOR UPDATE',
+      `SELECT i.id, i.item_name, i.quantity, i.min_threshold, i.unit
+       FROM inventory i
+       JOIN depositos d ON i.deposito_id = d.id
+       WHERE i.id = $1 AND i.refugio_id = $2 AND ${HEALTH_DEPOSITO_FILTER}
+       FOR UPDATE OF i`,
       [parseInt(inventory_item_id), parseInt(refugio_id)]
     );
     if (inventoryRes.rows.length === 0) {

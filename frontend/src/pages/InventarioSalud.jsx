@@ -34,50 +34,20 @@ export default function InventarioSalud({ token }) {
     fetchData();
   }, [refugioId]);
 
-  const findOrCreateHealthDeposito = async () => {
-    const resDep = await fetch(`${API_BASE}/refugios/${refugioId}/depositos`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (!resDep.ok) return null;
-
-    const depList = await resDep.json();
-    let dep = depList.find(d => {
-      const name = (d.name || '').toLowerCase();
-      return name.includes('médico') || name.includes('medico') || name.includes('salud');
-    });
-
-    if (!dep) {
-      const createRes = await fetch(`${API_BASE}/refugios/${refugioId}/depositos`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          name: 'Servicio Médico',
-          description: 'Depósito local del servicio médico para insumos de salud',
-          capacity_percent: 100
-        })
-      });
-      if (createRes.ok) dep = await createRes.json();
-    }
-
-    setHealthDeposito(dep || null);
-    return dep || null;
-  };
-
   const fetchData = async () => {
     setLoading(true);
     setError('');
     try {
-      const dep = await findOrCreateHealthDeposito();
-
-      const resInv = await fetch(`${API_BASE}/refugios/${refugioId}/inventory`, {
+      const resInv = await fetch(`${API_BASE}/refugios/${refugioId}/health-inventory`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (resInv.ok) {
-        const invData = await resInv.json();
-        setInventory(dep ? invData.filter(i => i.deposito_id === dep.id) : []);
+        const healthData = await resInv.json();
+        setHealthDeposito(healthData.deposito || null);
+        setInventory(Array.isArray(healthData.items) ? healthData.items : []);
+      } else {
+        const data = await resInv.json().catch(() => ({}));
+        throw new Error(data.error || 'No se pudo cargar el inventario de salud.');
       }
 
       const resReq = await fetch(`${API_BASE}/refugios/${refugioId}/warehouse-requests`, {
@@ -135,7 +105,7 @@ export default function InventarioSalud({ token }) {
 
   const handleSaveItem = async (e) => {
     e.preventDefault();
-    if (!itemName.trim() || !healthDeposito) return;
+    if (!itemName.trim()) return;
 
     setSaving(true);
     setError('');
@@ -144,7 +114,7 @@ export default function InventarioSalud({ token }) {
     const min = parseFloat(minThreshold) || 0;
 
     try {
-      const res = await fetch(`${API_BASE}/refugios/${refugioId}/inventory`, {
+      const res = await fetch(`${API_BASE}/refugios/${refugioId}/health-inventory`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -157,8 +127,7 @@ export default function InventarioSalud({ token }) {
           quantity: qty,
           min_threshold: min,
           unit,
-          status: qty === 0 ? 'Sin Stock' : qty <= min ? 'Stock Crítico' : 'Stock Suficiente',
-          deposito_id: healthDeposito.id
+          status: qty === 0 ? 'Sin Stock' : qty <= min ? 'Stock Crítico' : 'Stock Suficiente'
         })
       });
 
@@ -168,7 +137,8 @@ export default function InventarioSalud({ token }) {
         resetForm();
         fetchData();
       } else {
-        setError('Error al guardar el insumo de salud.');
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || 'Error al guardar el insumo de salud.');
       }
     } catch (err) {
       console.error(err);

@@ -64,7 +64,7 @@ export default function MedicationDelivery({ token }) {
       const headers = { 'Authorization': `Bearer ${token}` };
       const [resResidents, resInventory, resDeliveries] = await Promise.all([
         fetch(`${API_BASE}/damnificados?refugio_id=${refugioId}`, { headers }),
-        fetch(`${API_BASE}/refugios/${refugioId}/inventory`, { headers }),
+        fetch(`${API_BASE}/refugios/${refugioId}/health-inventory`, { headers }),
         fetch(`${API_BASE}/refugios/${refugioId}/medication-deliveries`, { headers })
       ]);
 
@@ -76,13 +76,11 @@ export default function MedicationDelivery({ token }) {
       }
 
       if (resInventory.ok) {
-        const inv = await resInventory.json();
-        const healthItems = inv.filter(item => {
-          const category = (item.category || '').toLowerCase();
-          const deposito = (item.deposito_name || '').toLowerCase();
-          return category.includes('medicina') || deposito.includes('médico') || deposito.includes('medico') || deposito.includes('salud');
-        });
-        setInventory(healthItems);
+        const healthData = await resInventory.json();
+        setInventory(Array.isArray(healthData.items) ? healthData.items : []);
+      } else {
+        const data = await resInventory.json().catch(() => ({}));
+        throw new Error(data.error || 'No se pudo cargar el inventario de salud.');
       }
 
       if (resDeliveries.ok) {
