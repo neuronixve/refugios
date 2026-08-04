@@ -130,7 +130,7 @@ export default function Sidebar({ user, selectedRefugio, onLogout, mobileOpen = 
                   <div className="flex flex-col gap-0.5 mt-1 ml-2 pl-2 border-l border-outline-variant/60 animate-in fade-in slide-in-from-top-1 duration-150">
                     <NavLink to={`/refugio/${selectedRefugio.id}/medico/triaje`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
                       <span className="material-symbols-outlined text-xs">medical_information</span>
-                      <span>Historial de Residentes</span>
+                      <span>Triaje e Historial</span>
                     </NavLink>
                     <NavLink to={`/refugio/${selectedRefugio.id}/medico/insumos`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
                       <span className="material-symbols-outlined text-xs">vaccines</span>

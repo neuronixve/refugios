@@ -53,6 +53,7 @@ async function initDb() {
     await runMigration('users.document_id', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS document_id VARCHAR(30)');
     await runMigration('users.photo', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS photo TEXT');
     await runMigration('users.staff_function', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_function VARCHAR(120)');
+    await runMigration('users.medical_profile', "ALTER TABLE users ADD COLUMN IF NOT EXISTS medical_profile TEXT DEFAULT '{}'");
     await runMigration('users.is_active', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE');
     await runMigration('users.deleted_at', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP');
     await runMigration('meal_attendance.staff_id', 'ALTER TABLE meal_attendance ADD COLUMN IF NOT EXISTS staff_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
@@ -597,6 +598,68 @@ app.get('/api/refugios/:refugio_id/staff', authenticateToken, async (req, res) =
   } catch (err) {
     console.error('Error al obtener personal de la sede:', err);
     res.status(500).json({ error: 'Error al obtener personal de la sede.' });
+  }
+});
+
+// Expedientes sanitarios del personal de apoyo y seguridad.
+app.get('/api/refugios/:refugio_id/medical-staff', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  if (!['admin', 'gerente', 'medico'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'No autorizado para consultar expedientes médicos del personal.' });
+  }
+
+  try {
+    const result = await db.query(
+      `SELECT id, name, role, document_id, photo, staff_function, refugio_id,
+              COALESCE(medical_profile, '{}') AS medical_profile
+       FROM users
+       WHERE refugio_id = $1
+         AND role IN ('apoyo', 'seguridad')
+         AND COALESCE(is_active, TRUE) = TRUE
+       ORDER BY name ASC`,
+      [parseInt(refugio_id)]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error al obtener expedientes médicos del personal:', err);
+    res.status(500).json({ error: 'Error al obtener expedientes médicos del personal.' });
+  }
+});
+
+app.put('/api/refugios/:refugio_id/medical-staff/:staff_id', authenticateToken, async (req, res) => {
+  const { refugio_id, staff_id } = req.params;
+  const { medical_profile } = req.body;
+  if (!['admin', 'gerente', 'medico'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'No autorizado para actualizar expedientes médicos del personal.' });
+  }
+
+  let normalizedProfile;
+  try {
+    normalizedProfile = typeof medical_profile === 'string'
+      ? JSON.stringify(JSON.parse(medical_profile))
+      : JSON.stringify(medical_profile || {});
+  } catch {
+    return res.status(400).json({ error: 'El perfil médico suministrado no es válido.' });
+  }
+
+  try {
+    const result = await db.query(
+      `UPDATE users
+       SET medical_profile = $1
+       WHERE id = $2
+         AND refugio_id = $3
+         AND role IN ('apoyo', 'seguridad')
+         AND COALESCE(is_active, TRUE) = TRUE
+       RETURNING id, name, role, document_id, photo, staff_function, refugio_id, medical_profile`,
+      [normalizedProfile, parseInt(staff_id), parseInt(refugio_id)]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Personal de apoyo o seguridad no encontrado en esta sede.' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error al actualizar expediente médico del personal:', err);
+    res.status(500).json({ error: 'Error al actualizar el expediente médico del personal.' });
   }
 });
 

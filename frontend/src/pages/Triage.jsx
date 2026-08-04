@@ -1,10 +1,34 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
+
+const API_BASE = window.location.hostname === 'localhost'
+  ? 'http://localhost:4000/api'
+  : 'https://api.venezuelarenacera.com/api';
+
+const normalizeStaffPatient = (person) => {
+  let medicalProfile = {};
+  try {
+    medicalProfile = JSON.parse(person.medical_profile || '{}');
+  } catch {
+    medicalProfile = {};
+  }
+  return {
+    ...person,
+    first_name: person.name,
+    last_name: '',
+    birth_date: medicalProfile.birth_date || null,
+    gender: medicalProfile.gender || null,
+    special_needs: JSON.stringify(medicalProfile),
+    patient_type: 'staff'
+  };
+};
 
 export default function Triage({ token }) {
   const { refugioId } = useParams();
   const [residents, setResidents] = useState([]);
+  const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [patientGroup, setPatientGroup] = useState('residents');
   
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -21,6 +45,8 @@ export default function Triage({ token }) {
   const [bloodType, setBloodType] = useState('O+');
   const [weight, setWeight] = useState('');
   const [height, setHeight] = useState('');
+  const [birthDate, setBirthDate] = useState('');
+  const [gender, setGender] = useState('');
   
   // New Evaluation
   const [evalTitle, setEvalTitle] = useState('Control Rutinario');
@@ -41,44 +67,49 @@ export default function Triage({ token }) {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
-  const API_BASE = window.location.hostname === 'localhost'
-    ? 'http://localhost:4000/api'
-    : 'https://api.venezuelarenacera.com/api';
-
-  useEffect(() => {
-    fetchResidents();
-  }, [refugioId]);
-
-  const fetchResidents = async () => {
+  const fetchPatients = useCallback(async () => {
     setLoading(true);
+    setError('');
     try {
-      const res = await fetch(`${API_BASE}/damnificados?refugio_id=${refugioId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const activeResidents = data.filter(r => r.status === 'Activo');
-        setResidents(activeResidents);
-        
-        // Default select first resident if available and none selected yet
-        if (activeResidents.length > 0 && !selectedResident) {
-          setSelectedResident(activeResidents[0]);
-        } else if (selectedResident) {
-          const updated = activeResidents.find(r => r.id === selectedResident.id);
-          if (updated) {
-            setSelectedResident(updated);
-          }
-        }
+      const headers = { 'Authorization': `Bearer ${token}` };
+      const [residentResponse, staffResponse] = await Promise.all([
+        fetch(`${API_BASE}/damnificados?refugio_id=${refugioId}`, { headers }),
+        fetch(`${API_BASE}/refugios/${refugioId}/medical-staff`, { headers })
+      ]);
+
+      if (!residentResponse.ok || !staffResponse.ok) {
+        throw new Error('No se pudo cargar el censo completo de pacientes.');
       }
+
+      const activeResidents = (await residentResponse.json())
+        .filter(r => r.status === 'Activo')
+        .map(r => ({ ...r, patient_type: 'resident' }));
+      const activeStaff = (await staffResponse.json()).map(normalizeStaffPatient);
+      setResidents(activeResidents);
+      setStaff(activeStaff);
+
+      setSelectedResident(currentPatient => {
+        if (!currentPatient) return activeResidents[0] || activeStaff[0] || null;
+        const updated = [...activeResidents, ...activeStaff].find(
+          patient => patient.id === currentPatient.id && patient.patient_type === currentPatient.patient_type
+        );
+        return updated || activeResidents[0] || activeStaff[0] || null;
+      });
     } catch (err) {
-      console.error(err);
+      setError(err.message || 'Error al cargar pacientes.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [refugioId, token]);
+
+  useEffect(() => {
+    fetchPatients();
+  }, [fetchPatients]);
+
+  const visiblePatients = patientGroup === 'staff' ? staff : residents;
 
   // Autocomplete search suggestions
-  const searchSuggestions = residents.filter(r => {
+  const searchSuggestions = visiblePatients.filter(r => {
     const fullName = `${r.first_name} ${r.last_name}`.toLowerCase();
     const doc = (r.document_id || '').toLowerCase();
     const q = searchQuery.toLowerCase();
@@ -89,6 +120,16 @@ export default function Triage({ token }) {
     setSelectedResident(res);
     setSearchQuery('');
     setShowSearchResults(false);
+  };
+
+  const handlePatientGroupChange = (group) => {
+    setPatientGroup(group);
+    setSearchQuery('');
+    setShowSearchResults(false);
+    const nextList = group === 'staff' ? staff : residents;
+    setSelectedResident(nextList[0] || null);
+    setMessage('');
+    setError('');
   };
 
   // Helper to parse JSON metadata
@@ -118,25 +159,35 @@ export default function Triage({ token }) {
     setError('');
     setMessage('');
     try {
-      const res = await fetch(`${API_BASE}/damnificados/${selectedResident.id}`, {
+      const isStaff = selectedResident.patient_type === 'staff';
+      const url = isStaff
+        ? `${API_BASE}/refugios/${refugioId}/medical-staff/${selectedResident.id}`
+        : `${API_BASE}/damnificados/${selectedResident.id}`;
+      const payload = isStaff
+        ? { medical_profile: updatedMeta }
+        : {
+            ...selectedResident,
+            birth_date: updatedMeta.birth_date || selectedResident.birth_date,
+            gender: updatedMeta.gender || selectedResident.gender,
+            special_needs: JSON.stringify(updatedMeta)
+          };
+      const res = await fetch(url, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          ...selectedResident,
-          special_needs: JSON.stringify(updatedMeta)
-        })
+        body: JSON.stringify(payload)
       });
 
       if (res.ok) {
-        fetchResidents();
+        await fetchPatients();
         setMessage('Expediente médico actualizado.');
       } else {
-        setError('Error al actualizar el expediente.');
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || 'Error al actualizar el expediente.');
       }
-    } catch (err) {
+    } catch {
       setError('Error al conectar con la API.');
     }
   };
@@ -146,6 +197,8 @@ export default function Triage({ token }) {
     setBloodType(meta.sangre || 'O+');
     setWeight(meta.peso || '');
     setHeight(meta.altura || '');
+    setBirthDate(meta.birth_date || selectedResident.birth_date?.slice?.(0, 10) || '');
+    setGender(meta.gender || selectedResident.gender || '');
     showAllergiesInput(meta.allergies ? meta.allergies.join(', ') : '');
     showChronicInput(meta.preexisting ? meta.preexisting.join(', ') : '');
     setShowVitalsModal(true);
@@ -163,6 +216,8 @@ export default function Triage({ token }) {
       sangre: bloodType,
       peso: weight,
       altura: height,
+      birth_date: birthDate || null,
+      gender: gender || null,
       allergies: allergiesInput.split(',').map(a => a.trim().toUpperCase()).filter(Boolean),
       preexisting: chronicInput.split(',').map(a => a.trim()).filter(Boolean)
     };
@@ -228,11 +283,32 @@ export default function Triage({ token }) {
       {/* Header */}
       <header className="mb-8">
         <h2 className="text-2xl font-extrabold text-primary">Triage y Perfil Médico</h2>
-        <p className="text-xs text-on-surface-variant">Gestión de alertas de salud, tratamientos médicos y bitácora clínica de residentes.</p>
+        <p className="text-xs text-on-surface-variant">Consultas, triaje, tratamientos e historial clínico de residentes y personal operativo.</p>
       </header>
 
       {error && <p className="mb-4 p-3 bg-error/10 border border-error/20 rounded-lg text-xs font-bold text-error">{error}</p>}
       {message && <p className="mb-4 p-3 bg-success/10 border border-success/20 rounded-lg text-xs font-bold text-success">{message}</p>}
+
+      <div className="inline-flex p-1 mb-5 bg-surface-container border border-outline-variant rounded-xl" role="tablist" aria-label="Tipo de paciente">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={patientGroup === 'residents'}
+          onClick={() => handlePatientGroupChange('residents')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${patientGroup === 'residents' ? 'bg-primary text-on-primary shadow-xs' : 'text-on-surface-variant hover:text-on-surface'}`}
+        >
+          Residentes <span className="ml-1 opacity-75">({residents.length})</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={patientGroup === 'staff'}
+          onClick={() => handlePatientGroupChange('staff')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${patientGroup === 'staff' ? 'bg-primary text-on-primary shadow-xs' : 'text-on-surface-variant hover:text-on-surface'}`}
+        >
+          Apoyo y Seguridad <span className="ml-1 opacity-75">({staff.length})</span>
+        </button>
+      </div>
 
       {/* SEARCH AUTOCOMPLETE BAR */}
       <div className="relative w-full max-w-2xl mb-8">
@@ -244,7 +320,7 @@ export default function Triage({ token }) {
             setSearchQuery(e.target.value);
             setShowSearchResults(true);
           }}
-          placeholder="Buscar paciente por cédula o nombre..." 
+          placeholder={`Buscar ${patientGroup === 'staff' ? 'personal' : 'residente'} por cédula o nombre...`}
           className="w-full bg-surface-container border border-outline-variant rounded-xl py-3 pl-10 pr-4 text-xs focus:outline-none"
         />
         {showSearchResults && searchSuggestions.length > 0 && (
@@ -256,7 +332,9 @@ export default function Triage({ token }) {
                 className="p-3 hover:bg-primary/5 cursor-pointer border-b border-outline-variant/30 flex justify-between items-center"
               >
                 <span className="font-bold text-on-surface">{res.first_name} {res.last_name}</span>
-                <span className="text-[10px] text-on-surface-variant">C.I. {res.document_id || 'N/T'}</span>
+                <span className="text-[10px] text-on-surface-variant">
+                  {res.patient_type === 'staff' ? (res.staff_function || (res.role === 'seguridad' ? 'Seguridad' : 'Apoyo')) : 'Residente'} · C.I. {res.document_id || 'N/T'}
+                </span>
               </div>
             ))}
           </div>
@@ -270,8 +348,8 @@ export default function Triage({ token }) {
           <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs flex flex-col justify-between">
             <div className="flex items-start gap-4">
               <div className="w-16 h-16 rounded-full border border-outline-variant bg-surface-container overflow-hidden flex items-center justify-center">
-                {meta.photo ? (
-                  <img src={meta.photo} alt="Avatar" className="w-full h-full object-cover" />
+                {(selectedResident.photo || meta.photo) ? (
+                  <img src={selectedResident.photo || meta.photo} alt={`Foto de ${selectedResident.first_name}`} className="w-full h-full object-cover" />
                 ) : (
                   <span className="material-symbols-outlined text-3xl text-on-surface-variant">person</span>
                 )}
@@ -279,7 +357,11 @@ export default function Triage({ token }) {
               <div className="flex-1">
                 <h3 className="text-lg font-black text-on-surface">{selectedResident.first_name} {selectedResident.last_name}</h3>
                 <span className="text-[10px] text-on-surface-variant block font-medium">C.I. {selectedResident.document_id || 'N/T'}</span>
-                <span className="text-[10px] text-primary font-bold block mt-0.5">ID: #REF-{selectedResident.id}</span>
+                <span className="text-[10px] text-primary font-bold block mt-0.5">
+                  {selectedResident.patient_type === 'staff'
+                    ? `${selectedResident.staff_function || (selectedResident.role === 'seguridad' ? 'Personal de Seguridad' : 'Personal de Apoyo')} · ID #PERS-${selectedResident.id}`
+                    : `Residente · ID #REF-${selectedResident.id}`}
+                </span>
               </div>
             </div>
 
@@ -290,7 +372,7 @@ export default function Triage({ token }) {
               </div>
               <div>
                 <span className="text-[9px] uppercase font-bold text-on-surface-variant block">Sexo</span>
-                <span className="font-bold text-on-surface">{selectedResident.gender || 'Masculino'}</span>
+                <span className="font-bold text-on-surface">{meta.gender || selectedResident.gender || 'Sin registrar'}</span>
               </div>
               <div>
                 <span className="text-[9px] uppercase font-bold text-on-surface-variant block">Peso</span>
@@ -370,7 +452,7 @@ export default function Triage({ token }) {
               className="mt-6 py-2.5 bg-primary text-on-primary font-bold rounded-lg text-xs hover:opacity-95 flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <span className="material-symbols-outlined text-sm">add</span>
-              Añadir Evaluación Médica
+              Nueva Consulta / Evaluación
             </button>
           </div>
 
@@ -420,7 +502,7 @@ export default function Triage({ token }) {
           <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs flex flex-col gap-4">
             <h3 className="text-xs font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-1.5">
               <span className="material-symbols-outlined text-sm">history</span>
-              Historial de Evaluaciones
+              Historial Médico y Consultas
             </h3>
 
             {meta.evaluations && meta.evaluations.length > 0 ? (
@@ -454,7 +536,9 @@ export default function Triage({ token }) {
           <span className="material-symbols-outlined text-5xl text-primary">clinical_notes</span>
           <div>
             <h4 className="text-md font-bold text-on-surface">Módulo de Triaje Médico</h4>
-            <p className="text-xs text-on-surface-variant mt-1">Busca a un residente por su cédula o nombre para ver su expediente de salud o registrar tratamientos.</p>
+            <p className="text-xs text-on-surface-variant mt-1">
+              {loading ? 'Cargando pacientes...' : `No hay ${patientGroup === 'staff' ? 'personal de apoyo o seguridad' : 'residentes activos'} disponible en esta sede.`}
+            </p>
           </div>
         </div>
       )}
@@ -464,7 +548,7 @@ export default function Triage({ token }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs">
           <div className="bg-surface rounded-2xl border border-outline-variant p-6 w-full max-w-md shadow-lg animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-md font-bold text-primary">Añadir Evaluación Clínica</h3>
+              <h3 className="text-md font-bold text-primary">Registrar Consulta Médica</h3>
               <button onClick={() => setShowEvalModal(false)} className="text-on-surface-variant hover:bg-surface-container rounded-full p-2">
                 <span className="material-symbols-outlined">close</span>
               </button>
@@ -472,7 +556,7 @@ export default function Triage({ token }) {
             
             <form onSubmit={handleAddEvaluation} className="flex flex-col gap-4 text-xs">
               <div>
-                <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Título de la Evaluación</label>
+                <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Motivo / Tipo de Consulta</label>
                 <input 
                   type="text" 
                   value={evalTitle} 
@@ -516,7 +600,7 @@ export default function Triage({ token }) {
               </div>
 
               <button type="submit" className="mt-2 w-full py-3 bg-primary text-on-primary font-bold rounded-lg cursor-pointer">
-                Guardar Evaluación
+                Guardar en Historial
               </button>
             </form>
           </div>
@@ -653,6 +737,31 @@ export default function Triage({ token }) {
             </div>
             
             <form onSubmit={handleSaveVitals} className="flex flex-col gap-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Fecha de Nacimiento</label>
+                  <input
+                    type="date"
+                    value={birthDate}
+                    onChange={e => setBirthDate(e.target.value)}
+                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Sexo</label>
+                  <select
+                    value={gender}
+                    onChange={e => setGender(e.target.value)}
+                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 focus:outline-none"
+                  >
+                    <option value="">Sin registrar</option>
+                    <option value="Femenino">Femenino</option>
+                    <option value="Masculino">Masculino</option>
+                    <option value="Otro">Otro</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-1">
                   <label className="text-[10px] font-bold text-on-surface-variant block mb-1">Grupo Sangre</label>
