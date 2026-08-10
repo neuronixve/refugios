@@ -43,6 +43,17 @@ export default function MedicalAlerts({ token }) {
     }
   };
 
+  const handleDeleteSupply = async item => {
+    if (!window.confirm(`¿Eliminar el insumo médico "${item.item_name}"?`)) return;
+    const res = await fetch(`${API_BASE}/refugios/${refugioId}/health-inventory/${item.id}`, {
+      method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return setError(data.error || 'No se pudo eliminar el insumo.');
+    setMessage(data.message || 'Insumo médico eliminado.');
+    fetchData();
+  };
+
   useEffect(() => {
     fetchData();
   }, [refugioId]);
@@ -203,12 +214,7 @@ export default function MedicalAlerts({ token }) {
                     </div>
                     <div className="flex justify-between items-end mt-4 pt-3 border-t border-outline-variant/30">
                       <span className={`text-md font-black font-mono ${empty ? 'text-error' : 'text-amber-700'}`}>{qty} {item.unit || 'Unidades'}</span>
-                      <button
-                        onClick={() => handleRequestWarehouse(item.item_name, suggestedRequest(item))}
-                        className="text-[9px] font-black text-primary hover:underline uppercase"
-                      >
-                        Solicitar al Almacén
-                      </button>
+                      <div className="flex gap-2"><button onClick={() => handleRequestWarehouse(item.item_name, suggestedRequest(item))} className="text-[9px] font-black text-primary hover:underline uppercase">Solicitar</button><button onClick={() => handleDeleteSupply(item)} className="text-[9px] font-black text-error hover:underline uppercase">Eliminar</button></div>
                     </div>
                   </div>
                 );

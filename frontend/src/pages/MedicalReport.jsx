@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { downloadExcel } from '../utils/exportExcel';
 
 export default function MedicalReport({ token }) {
   const { refugioId } = useParams();
@@ -60,6 +61,14 @@ export default function MedicalReport({ token }) {
       asma: 0,
       discapacidad: 0
     };
+    const patSex = {
+      hipertension: { F: 0, M: 0 }, diabetes: { F: 0, M: 0 },
+      asma: { F: 0, M: 0 }, discapacidad: { F: 0, M: 0 }
+    };
+    const countBySex = (key, resident) => {
+      if (resident.gender === 'Femenino') patSex[key].F++;
+      else if (resident.gender === 'Masculino') patSex[key].M++;
+    };
 
     residents.forEach(r => {
       // Age
@@ -105,10 +114,10 @@ export default function MedicalReport({ token }) {
           }
 
           // Count specific
-          if (meta.hypertension || normalizedPathologies.includes('hipertensión') || normalizedPathologies.includes('hipertension')) patList.hipertension++;
-          if (meta.diabetes || normalizedPathologies.includes('diabetes')) patList.diabetes++;
-          if (meta.asthma || normalizedPathologies.includes('asma')) patList.asma++;
-          if (meta.discapacidadMotriz || String(meta.discapacidad || '').trim().toLowerCase() === 'motora') patList.discapacidad++;
+          if (meta.hypertension || normalizedPathologies.includes('hipertensión') || normalizedPathologies.includes('hipertension')) { patList.hipertension++; countBySex('hipertension', r); }
+          if (meta.diabetes || normalizedPathologies.includes('diabetes')) { patList.diabetes++; countBySex('diabetes', r); }
+          if (meta.asthma || normalizedPathologies.includes('asma')) { patList.asma++; countBySex('asma', r); }
+          if (meta.discapacidadMotriz || String(meta.discapacidad || '').trim().toLowerCase() === 'motora') { patList.discapacidad++; countBySex('discapacidad', r); }
 
         } catch {
           // fallback
@@ -120,7 +129,7 @@ export default function MedicalReport({ token }) {
       }
     });
 
-    return { embarazadas, cronicos, tratamientos, lactantes, prescolar, escolar, patList };
+    return { embarazadas, cronicos, tratamientos, lactantes, prescolar, escolar, patList, patSex };
   };
 
   const data = getDemographicsAndPathologies();
@@ -168,6 +177,12 @@ export default function MedicalReport({ token }) {
   const handlePrintPDF = () => {
     window.print();
   };
+  const handleExcel = () => downloadExcel(`reporte-salud-sede-${refugioId}.xls`,
+    ['Residente', 'Cédula', 'Sexo', 'Fecha nacimiento', 'Estado de salud', 'Patologías', 'Tratamientos', 'Alergias'],
+    residents.map(resident => {
+      let meta = {}; try { meta = JSON.parse(resident.special_needs || '{}'); } catch { meta = {}; }
+      return [`${resident.first_name} ${resident.last_name}`.toUpperCase(), resident.document_id || 'N/T', resident.gender || 'N/T', resident.birth_date ? resident.birth_date.split('T')[0] : 'N/T', resident.health_status || 'N/T', (meta.preexisting || []).join(', '), meta.treatments || '', Array.isArray(meta.allergies) ? meta.allergies.join(', ') : (meta.allergies || '')];
+    }), 'Reporte de salud separado por sexo');
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -192,6 +207,7 @@ export default function MedicalReport({ token }) {
             <span className="material-symbols-outlined text-sm">picture_as_pdf</span>
             Reporte PDF
           </button>
+          <button onClick={handleExcel} className="px-5 py-3 bg-success text-white font-bold rounded-xl text-xs flex items-center gap-2"><span className="material-symbols-outlined text-sm">table_view</span>Reporte Excel</button>
         </div>
       </header>
 
@@ -344,6 +360,8 @@ export default function MedicalReport({ token }) {
                     <tr className="border-b border-outline-variant text-on-surface-variant font-bold">
                       <th className="pb-2">Condición Pre-existente</th>
                       <th className="pb-2 text-center">Pacientes</th>
+                      <th className="pb-2 text-center">Femenino</th>
+                      <th className="pb-2 text-center">Masculino</th>
                       <th className="pb-2">Suministro Crítico</th>
                       <th className="pb-2 text-right">Stock</th>
                     </tr>
@@ -352,6 +370,7 @@ export default function MedicalReport({ token }) {
                     <tr className="border-b border-outline-variant/30">
                       <td className="py-2.5 font-bold text-on-surface">Hipertensión Arterial</td>
                       <td className="py-2.5 text-center font-bold font-mono text-[#0b2347]">{data.patList.hipertension}</td>
+                      <td className="py-2.5 text-center font-bold">{data.patSex.hipertension.F}</td><td className="py-2.5 text-center font-bold">{data.patSex.hipertension.M}</td>
                       <td className="py-2.5 text-on-surface-variant font-medium">Enalapril / Losartán</td>
                       <td className="py-2.5 text-right">
                         <span className={`px-2 py-0.5 rounded font-black text-[8px] uppercase ${
@@ -362,6 +381,7 @@ export default function MedicalReport({ token }) {
                     <tr className="border-b border-outline-variant/30">
                       <td className="py-2.5 font-bold text-on-surface">Diabetes Mellitus</td>
                       <td className="py-2.5 text-center font-bold font-mono text-[#0b2347]">{data.patList.diabetes}</td>
+                      <td className="py-2.5 text-center font-bold">{data.patSex.diabetes.F}</td><td className="py-2.5 text-center font-bold">{data.patSex.diabetes.M}</td>
                       <td className="py-2.5 text-on-surface-variant font-medium">Insulina / Metformina</td>
                       <td className="py-2.5 text-right">
                         <span className={`px-2 py-0.5 rounded font-black text-[8px] uppercase ${getStockStatus(['Insulina', 'Metformina']) === 'OK' ? 'bg-success/15 text-success' : 'bg-error/15 text-error'}`}>{getStockStatus(['Insulina', 'Metformina'])}</span>
@@ -370,6 +390,7 @@ export default function MedicalReport({ token }) {
                     <tr className="border-b border-outline-variant/30">
                       <td className="py-2.5 font-bold text-on-surface">Asma Bronquial</td>
                       <td className="py-2.5 text-center font-bold font-mono text-[#0b2347]">{data.patList.asma}</td>
+                      <td className="py-2.5 text-center font-bold">{data.patSex.asma.F}</td><td className="py-2.5 text-center font-bold">{data.patSex.asma.M}</td>
                       <td className="py-2.5 text-on-surface-variant font-medium">Salbutamol Inhalador</td>
                       <td className="py-2.5 text-right">
                         <span className={`px-2 py-0.5 rounded font-black text-[8px] uppercase ${
@@ -380,6 +401,7 @@ export default function MedicalReport({ token }) {
                     <tr className="border-b border-outline-variant/30">
                       <td className="py-2.5 font-bold text-on-surface">Discapacidad Motriz</td>
                       <td className="py-2.5 text-center font-bold font-mono text-[#0b2347]">{data.patList.discapacidad}</td>
+                      <td className="py-2.5 text-center font-bold">{data.patSex.discapacidad.F}</td><td className="py-2.5 text-center font-bold">{data.patSex.discapacidad.M}</td>
                       <td className="py-2.5 text-on-surface-variant font-medium">Insumos Movilidad</td>
                       <td className="py-2.5 text-right">
                         <span className={`px-2 py-0.5 rounded font-black text-[8px] uppercase ${getStockStatus(['Silla', 'Muleta', 'Movilidad']) === 'OK' ? 'bg-success/15 text-success' : 'bg-error/15 text-error'}`}>{getStockStatus(['Silla', 'Muleta', 'Movilidad'])}</span>

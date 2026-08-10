@@ -19,6 +19,14 @@ const normalizeResidentDocumentId = value => {
   return placeholders.includes(normalized) ? null : documentId;
 };
 
+const normalizePersonName = value => String(value || '').trim().toLocaleUpperCase('es-VE');
+
+const writeFamilyAudit = (executor, familyGroupId, userId, action, changes = {}) => executor.query(
+  `INSERT INTO family_group_audit (family_group_id, user_id, action, changes)
+   VALUES ($1, $2, $3, $4::jsonb)`,
+  [familyGroupId, userId || null, action, JSON.stringify(changes || {})]
+);
+
 app.use(cors({
   origin: [
     'https://venezuelarenacera.com',
@@ -81,9 +89,23 @@ async function initDb() {
     await runMigration('family_groups.registered_by', 'ALTER TABLE family_groups ADD COLUMN IF NOT EXISTS registered_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
     await runMigration('family_groups.updated_by', 'ALTER TABLE family_groups ADD COLUMN IF NOT EXISTS updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
     await runMigration('family_groups.updated_at', 'ALTER TABLE family_groups ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()');
+    await runMigration('family_groups.deleted_at', 'ALTER TABLE family_groups ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP');
+    await runMigration('family_groups.deleted_by', 'ALTER TABLE family_groups ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
+    await runMigration('damnificados.deleted_family_group_id', 'ALTER TABLE damnificados ADD COLUMN IF NOT EXISTS deleted_family_group_id INTEGER REFERENCES family_groups(id) ON DELETE SET NULL');
     await runMigration('damnificados.registered_by', 'ALTER TABLE damnificados ADD COLUMN IF NOT EXISTS registered_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
     await runMigration('damnificados.updated_by', 'ALTER TABLE damnificados ADD COLUMN IF NOT EXISTS updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
     await runMigration('damnificados.updated_at', 'ALTER TABLE damnificados ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()');
+    await runMigration('resident names uppercase', `UPDATE damnificados
+      SET first_name = UPPER(BTRIM(first_name)), last_name = UPPER(BTRIM(last_name))
+      WHERE first_name <> UPPER(BTRIM(first_name)) OR last_name <> UPPER(BTRIM(last_name))`);
+    await db.query(`CREATE TABLE IF NOT EXISTS family_group_audit (
+      id SERIAL PRIMARY KEY,
+      family_group_id INTEGER NOT NULL REFERENCES family_groups(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      action VARCHAR(30) NOT NULL,
+      changes JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
     await db.query(`
       CREATE TABLE IF NOT EXISTS medication_deliveries (
         id SERIAL PRIMARY KEY,
@@ -747,13 +769,14 @@ app.delete('/api/refugios/:id', authenticateToken, async (req, res) => {
 
 // --- RUTAS DE GRUPOS FAMILIARES ---
 app.get('/api/family-groups', authenticateToken, async (req, res) => {
-  const { refugio_id } = req.query;
+  const { refugio_id, include_deleted } = req.query;
   try {
     const params = [];
-    let scope = '';
+    const filters = [include_deleted === 'true' ? 'fg.deleted_at IS NOT NULL' : 'fg.deleted_at IS NULL'];
     if (refugio_id) {
       params.push(parseInt(refugio_id));
-      scope = `WHERE EXISTS (SELECT 1 FROM damnificados scoped WHERE scoped.family_group_id = fg.id AND scoped.refugio_id = $1)`;
+      filters.push(`EXISTS (SELECT 1 FROM damnificados scoped
+        WHERE (scoped.family_group_id = fg.id OR scoped.deleted_family_group_id = fg.id) AND scoped.refugio_id = $1)`);
     }
     const result = await db.query(`
       SELECT fg.*,
@@ -761,6 +784,9 @@ app.get('/api/family-groups', authenticateToken, async (req, res) => {
              creator.document_id AS registered_by_document,
              creator.staff_function AS registered_by_function,
              updater.name AS updated_by_name,
+             updater.document_id AS updated_by_document,
+             updater.staff_function AS updated_by_function,
+             deleter.name AS deleted_by_name,
              COUNT(d.id) FILTER (WHERE d.status = 'Activo')::int as members_count,
              COUNT(d.id)::int as total_members,
              COUNT(d.id) FILTER (
@@ -768,11 +794,12 @@ app.get('/api/family-groups', authenticateToken, async (req, res) => {
                  AND d.special_needs ~ '"tiene_mascotas"\\s*:\\s*"Sí"'
              )::int as pets_count
       FROM family_groups fg
-      LEFT JOIN damnificados d ON fg.id = d.family_group_id
+      LEFT JOIN damnificados d ON fg.id = COALESCE(d.family_group_id, d.deleted_family_group_id)
       LEFT JOIN users creator ON creator.id = fg.registered_by
       LEFT JOIN users updater ON updater.id = fg.updated_by
-      ${scope}
-      GROUP BY fg.id, creator.id, updater.id
+      LEFT JOIN users deleter ON deleter.id = fg.deleted_by
+      WHERE ${filters.join(' AND ')}
+      GROUP BY fg.id, creator.id, updater.id, deleter.id
       ORDER BY fg.family_name ASC
     `, params);
     res.json(result.rows);
@@ -793,7 +820,7 @@ app.get('/api/family-groups/export', authenticateToken, async (req, res) => {
     const residentsResult = await db.query(
       `SELECT d.*, fg.family_name
        FROM damnificados d
-       LEFT JOIN family_groups fg ON d.family_group_id = fg.id
+       LEFT JOIN family_groups fg ON d.family_group_id = fg.id AND fg.deleted_at IS NULL
        WHERE d.refugio_id = $1 AND d.status = 'Activo'
        ORDER BY (d.family_group_id IS NULL) ASC, fg.family_name ASC, d.created_at ASC`,
       [refugioId]
@@ -806,7 +833,7 @@ app.get('/api/family-groups/export', authenticateToken, async (req, res) => {
       if (!grouped.has(groupKey)) {
         grouped.set(groupKey, {
           id: resident.family_group_id,
-          family_name: isSolo ? 'SIN GRUPO FAMILIAR' : resident.family_name,
+          family_name: isSolo ? `FAMILIA UNIPERSONAL - ${resident.first_name} ${resident.last_name}` : resident.family_name,
           isSolo,
           members: []
         });
@@ -842,7 +869,7 @@ app.post('/api/family-groups', authenticateToken, async (req, res) => {
   const { family_name, block_assignment, intake_data = {} } = req.body;
   if (!family_name) return res.status(400).json({ error: 'El nombre de la familia es requerido.' });
   try {
-    const duplicate = await db.query('SELECT id, family_name FROM family_groups WHERE LOWER(TRIM(family_name)) = LOWER(TRIM($1)) LIMIT 1', [family_name]);
+    const duplicate = await db.query('SELECT id, family_name FROM family_groups WHERE deleted_at IS NULL AND LOWER(TRIM(family_name)) = LOWER(TRIM($1)) LIMIT 1', [family_name]);
     if (duplicate.rows.length > 0) {
       return res.status(409).json({ error: 'Ya existe una familia con ese mismo nombre. Use la opción de unificar familias si se trata de un duplicado.', existing_family: duplicate.rows[0] });
     }
@@ -851,6 +878,7 @@ app.post('/api/family-groups', authenticateToken, async (req, res) => {
        VALUES ($1, $2, $3::jsonb, $4, $4) RETURNING *`,
       [family_name, block_assignment, JSON.stringify(intake_data || {}), req.user?.id || null]
     );
+    await writeFamilyAudit(db, result.rows[0].id, req.user?.id, 'CREATED', { family_name, block_assignment });
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -864,7 +892,7 @@ app.put('/api/family-groups/:id', authenticateToken, async (req, res) => {
   if (!family_name || !family_name.trim()) return res.status(400).json({ error: 'El nombre de la familia es requerido.' });
   try {
     const duplicate = await db.query(
-      'SELECT id FROM family_groups WHERE LOWER(TRIM(family_name)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1',
+      'SELECT id FROM family_groups WHERE deleted_at IS NULL AND LOWER(TRIM(family_name)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1',
       [family_name, id]
     );
     if (duplicate.rows.length > 0) {
@@ -877,16 +905,96 @@ app.put('/api/family-groups/:id', authenticateToken, async (req, res) => {
            intake_data = COALESCE($3::jsonb, intake_data, '{}'::jsonb),
            updated_by = $4,
            updated_at = NOW()
-       WHERE id = $5
+       WHERE id = $5 AND deleted_at IS NULL
        RETURNING *`,
       [family_name.trim(), block_assignment || null, intake_data === undefined ? null : JSON.stringify(intake_data || {}), req.user?.id || null, id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Grupo familiar no encontrado.' });
-    res.json(result.rows[0]);
+    await writeFamilyAudit(db, result.rows[0].id, req.user?.id, 'UPDATED', {
+      family_name: family_name.trim(), block_assignment: block_assignment || null, intake_data_updated: intake_data !== undefined
+    });
+    const enriched = await db.query(
+      `SELECT fg.*, u.name AS updated_by_name, u.document_id AS updated_by_document,
+              u.staff_function AS updated_by_function
+       FROM family_groups fg LEFT JOIN users u ON u.id = fg.updated_by WHERE fg.id = $1`,
+      [result.rows[0].id]
+    );
+    res.json(enriched.rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al actualizar el grupo familiar.' });
   }
+});
+
+app.get('/api/family-groups/:id/audit', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT a.id, a.action, a.changes, a.created_at, u.name AS user_name,
+              u.document_id AS user_document, u.staff_function AS user_function
+       FROM family_group_audit a
+       LEFT JOIN users u ON u.id = a.user_id
+       WHERE a.family_group_id = $1
+       ORDER BY a.created_at DESC, a.id DESC`,
+      [parseInt(req.params.id)]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'No se pudo obtener la trazabilidad de la familia.' });
+  }
+});
+
+app.delete('/api/family-groups/:id', authenticateToken, async (req, res) => {
+  const familyId = parseInt(req.params.id);
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const family = await client.query(
+      `UPDATE family_groups SET deleted_at = NOW(), deleted_by = $2, updated_by = $2, updated_at = NOW()
+       WHERE id = $1 AND deleted_at IS NULL RETURNING id, family_name`,
+      [familyId, req.user?.id || null]
+    );
+    if (!family.rows.length) throw Object.assign(new Error('Familia no encontrada o ya eliminada.'), { status: 404 });
+    const moved = await client.query(
+      `UPDATE damnificados SET deleted_family_group_id = family_group_id, family_group_id = NULL,
+       updated_by = $2, updated_at = NOW() WHERE family_group_id = $1 RETURNING id`,
+      [familyId, req.user?.id || null]
+    );
+    await writeFamilyAudit(client, familyId, req.user?.id, 'DELETED', { detached_members: moved.rowCount });
+    await client.query('COMMIT');
+    res.json({ message: 'Familia eliminada. Sus residentes conservan su ficha y pueden recuperarse al restaurarla.', detached_members: moved.rowCount });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(err.status || 500).json({ error: err.message || 'No se pudo eliminar la familia.' });
+  } finally { client.release(); }
+});
+
+app.put('/api/family-groups/:id/restore', authenticateToken, async (req, res) => {
+  const familyId = parseInt(req.params.id);
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const family = await client.query(
+      `UPDATE family_groups SET deleted_at = NULL, deleted_by = NULL, updated_by = $2, updated_at = NOW()
+       WHERE id = $1 AND deleted_at IS NOT NULL RETURNING id, family_name`,
+      [familyId, req.user?.id || null]
+    );
+    if (!family.rows.length) throw Object.assign(new Error('Familia no encontrada o ya restaurada.'), { status: 404 });
+    const restored = await client.query(
+      `UPDATE damnificados SET family_group_id = $1, deleted_family_group_id = NULL,
+       updated_by = $2, updated_at = NOW()
+       WHERE deleted_family_group_id = $1 AND family_group_id IS NULL RETURNING id`,
+      [familyId, req.user?.id || null]
+    );
+    await writeFamilyAudit(client, familyId, req.user?.id, 'RESTORED', { restored_members: restored.rowCount });
+    await client.query('COMMIT');
+    res.json({ message: 'Familia restaurada correctamente.', restored_members: restored.rowCount });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(err.status || 500).json({ error: err.message || 'No se pudo restaurar la familia.' });
+  } finally { client.release(); }
 });
 
 app.post('/api/family-groups/merge', authenticateToken, async (req, res) => {
@@ -1251,7 +1359,7 @@ app.post('/api/damnificados', authenticateToken, async (req, res) => {
       `INSERT INTO damnificados 
       (document_id, first_name, last_name, birth_date, gender, health_status, special_needs, refugio_id, family_group_id, registered_by, updated_by)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10) RETURNING *`,
-      [normalizeResidentDocumentId(document_id), first_name, last_name, birth_date || null, gender || null, health_status || 'Estable', special_needs || null, refugio_id || null, family_group_id || null, req.user?.id || null]
+      [normalizeResidentDocumentId(document_id), normalizePersonName(first_name), normalizePersonName(last_name), birth_date || null, gender || null, health_status || 'Estable', special_needs || null, refugio_id || null, family_group_id || null, req.user?.id || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1289,7 +1397,7 @@ app.put('/api/damnificados/:id', authenticateToken, async (req, res) => {
         gender = $5, health_status = $6, special_needs = $7, refugio_id = $8,
         family_group_id = $9, status = $10, updated_by = $11, updated_at = NOW()
       WHERE id = $12 RETURNING *`,
-      [normalizeResidentDocumentId(document_id), first_name, last_name, birth_date || null, gender || null, health_status || 'Estable', special_needs || null, refugio_id || null, family_group_id || null, status || 'Activo', req.user?.id || null, id]
+      [normalizeResidentDocumentId(document_id), normalizePersonName(first_name), normalizePersonName(last_name), birth_date || null, gender || null, health_status || 'Estable', special_needs || null, refugio_id || null, family_group_id || null, status || 'Activo', req.user?.id || null, id]
     );
 
     if (result.rows.length === 0) {
@@ -1585,6 +1693,21 @@ app.post('/api/refugios/:refugio_id/health-inventory', authenticateToken, requir
   }
 });
 
+app.delete('/api/refugios/:refugio_id/health-inventory/:id', authenticateToken, requireMedicalInventoryWriter, async (req, res) => {
+  try {
+    const deposito = await getOrCreateHealthDeposito(db, req.params.refugio_id);
+    const result = await db.query(
+      `DELETE FROM inventory WHERE id = $1 AND refugio_id = $2 AND deposito_id = $3 RETURNING id, item_name`,
+      [parseInt(req.params.id), parseInt(req.params.refugio_id), deposito.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Insumo médico no encontrado en esta sede.' });
+    res.json({ message: `El insumo médico ${result.rows[0].item_name} fue eliminado.` });
+  } catch (err) {
+    console.error('Error al eliminar insumo de salud:', err);
+    res.status(500).json({ error: 'No se pudo eliminar el insumo médico.' });
+  }
+});
+
 app.get('/api/refugios/:refugio_id/inventory', authenticateToken, async (req, res) => {
   const { refugio_id } = req.params;
   try {
@@ -1666,6 +1789,18 @@ app.post('/api/refugios/:refugio_id/deliveries', authenticateToken, denyMedicalG
   }
 
   try {
+    const allowedItem = await db.query(
+      `SELECT i.id, i.category FROM inventory i
+       LEFT JOIN depositos d ON d.id = i.deposito_id
+       WHERE i.refugio_id = $1 AND i.item_name = $2
+         AND LOWER(COALESCE(i.category, '')) NOT IN ('medicinas', 'medicina', 'alimentos', 'alimento')
+         AND NOT (${HEALTH_DEPOSITO_FILTER})
+       ORDER BY i.quantity DESC LIMIT 1`,
+      [parseInt(refugio_id), item_name]
+    );
+    if (!allowedItem.rows.length) {
+      return res.status(400).json({ error: 'Los medicamentos se entregan exclusivamente en el módulo médico y los alimentos en comedor/logística.' });
+    }
     // Registrar entrega
     const result = await db.query(
       'INSERT INTO supply_deliveries (refugio_id, resident_id, item_name, quantity, delivered_by) VALUES ($1, $2, $3, $4, $5) RETURNING *',

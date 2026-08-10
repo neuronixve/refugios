@@ -34,6 +34,7 @@ export default function LogisticsMenus({ token }) {
   const MEALS = ['Desayuno', 'Almuerzo', 'Cena'];
   const todayName = DAYS[(new Date().getDay() + 6) % 7];
   const [requirementDay, setRequirementDay] = useState(todayName);
+  const [requirementScope, setRequirementScope] = useState('day');
 
   useEffect(() => {
     fetchData();
@@ -133,7 +134,6 @@ export default function LogisticsMenus({ token }) {
   const activeResidents = residents.filter(r => r.status === 'Activo');
   const totalActive = activeResidents.length;
   const totalStaff = staffCount;
-  const totalDiners = totalActive + totalStaff;
 
   let lactantesCount = 0;
   let hipertensosCount = 0;
@@ -177,6 +177,8 @@ export default function LogisticsMenus({ token }) {
     if (['l', 'lt', 'lts', 'litro', 'litros'].includes(unit)) return 'litros';
     if (['ml', 'mililitro', 'mililitros'].includes(unit)) return 'ml';
     if (['paq', 'paquete', 'paquetes'].includes(unit)) return 'paquetes';
+    if (['pote', 'potes', 'frasco', 'frascos'].includes(unit)) return 'potes';
+    if (['empaque', 'empaques', 'pack', 'packs'].includes(unit)) return 'empaques';
     if (['u', 'ud', 'uds', 'unidad', 'unidades'].includes(unit)) return 'Unidades';
     return value.trim() || 'Unidades';
   };
@@ -193,7 +195,7 @@ export default function LogisticsMenus({ token }) {
   const parseIngredients = (ingredients) => {
     if (!ingredients) return [];
     const reqs = {};
-    const normalizedText = ingredients.replace(/\s+y\s+(?=\d+(?:[.,]\d+)?\s*(?:kg|g|gr|gramos|paquetes|paq|l|lt|litros|ml|unidades|uds|u)\b)/gi, ', ');
+    const normalizedText = ingredients.replace(/\s+y\s+(?=\d+(?:[.,]\d+)?\s*(?:kg|g|gr|gramos|paquetes|paq|potes?|frascos?|empaques?|packs?|l|lt|litros|ml|unidades|uds|u)\b)/gi, ', ');
     const parts = normalizedText.split(/[;\n]+|,\s+(?=(?:\d|[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]))/);
 
     parts.forEach(part => {
@@ -214,8 +216,8 @@ export default function LogisticsMenus({ token }) {
           unit = normalizeUnit(numMatch[2]);
         }
       } else {
-        const leadMatch = trimmed.match(/^(\d+(?:[.,]\d+)?)\s*(?:(kg|g|gr|gramos|paquetes|paq|l|lt|litros|ml|unidades|uds|u))?\s*(?:de\s+)?(.*)$/i);
-        const trailMatch = trimmed.match(/^(.*?)\s+(\d+(?:[.,]\d+)?)\s*(kg|g|gr|gramos|paquetes|paq|l|lt|litros|ml|unidades|uds|u)?$/i);
+        const leadMatch = trimmed.match(/^(\d+(?:[.,]\d+)?)\s*(?:(kg|g|gr|gramos|paquetes|paq|potes?|frascos?|empaques?|packs?|l|lt|litros|ml|unidades|uds|u))?\s*(?:de\s+)?(.*)$/i);
+        const trailMatch = trimmed.match(/^(.*?)\s+(\d+(?:[.,]\d+)?)\s*(kg|g|gr|gramos|paquetes|paq|potes?|frascos?|empaques?|packs?|l|lt|litros|ml|unidades|uds|u)?$/i);
 
         if (leadMatch) {
           qty = parseFloat(leadMatch[1].replace(',', '.'));
@@ -243,10 +245,10 @@ export default function LogisticsMenus({ token }) {
     return Object.values(reqs);
   };
 
-  const getDailyRequiredIngredients = () => {
+  const getRequiredIngredients = () => {
     const reqs = {};
     menus
-      .filter(m => m.day_of_week === requirementDay)
+      .filter(m => requirementScope === 'week' || m.day_of_week === requirementDay)
       .forEach(m => {
         parseIngredients(m.ingredients).forEach(ingredient => {
           const key = normalizeName(`${ingredient.name}_${ingredient.unit}`);
@@ -255,16 +257,16 @@ export default function LogisticsMenus({ token }) {
               name: ingredient.name,
               quantity: 0,
               unit: ingredient.unit,
-              perServing: ingredient.quantity
+              mealTotal: ingredient.quantity
             };
           }
-          reqs[key].quantity += ingredient.quantity * totalDiners;
+          reqs[key].quantity += ingredient.quantity;
         });
       });
     return Object.values(reqs);
   };
 
-  const dailyRequirements = getDailyRequiredIngredients();
+  const dailyRequirements = getRequiredIngredients();
 
   // Compare requirements with current local stock of Alimentos
   const missingIngredients = dailyRequirements.map(req => {
@@ -303,7 +305,9 @@ export default function LogisticsMenus({ token }) {
             item_name: item.name,
             quantity: item.missing,
             unit: item.unit,
-            details: `Requerimiento diario ${requirementDay}. Cálculo automático para ${totalActive} residentes + ${totalStaff} personal de apoyo = ${totalDiners} raciones.`
+            details: requirementScope === 'week'
+              ? 'Requerimiento semanal calculado con las cantidades totales registradas para cada preparación.'
+              : `Requerimiento diario ${requirementDay} calculado con las cantidades totales registradas para cada preparación.`
           })
         });
         if (res.ok) {
@@ -311,7 +315,7 @@ export default function LogisticsMenus({ token }) {
         }
       }
       if (successCount > 0) {
-        setMessage(`Se enviaron ${successCount} solicitudes del requerimiento diario de ${requirementDay} al almacén central.`);
+        setMessage(`Se enviaron ${successCount} solicitudes del requerimiento ${requirementScope === 'week' ? 'semanal' : `diario de ${requirementDay}`} al almacén central.`);
         fetchData();
       } else {
         setError('Error al enviar las solicitudes al almacén.');
@@ -368,7 +372,7 @@ export default function LogisticsMenus({ token }) {
       {/* Header */}
       <header className="mb-8">
         <h2 className="text-2xl font-extrabold text-[#0b2347] uppercase leading-none">Gestión de Menús</h2>
-        <p className="text-xs text-on-surface-variant mt-1.5">Prepare y configure la ración nutricional semanal y controle ingredientes.</p>
+        <p className="text-xs text-on-surface-variant mt-1.5">Registre las cantidades totales utilizadas en cada preparación y controle el inventario real de cocina.</p>
       </header>
 
       {error && (
@@ -393,7 +397,7 @@ export default function LogisticsMenus({ token }) {
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs">
               <div className="flex justify-between items-center mb-6">
                 <span className="text-xs font-black text-on-surface uppercase tracking-wider">Calendario Semanal</span>
-                <span className="text-[10px] text-on-surface-variant font-bold">Haz clic en una comida para cargar plato e ingredientes por ración</span>
+                <span className="text-[10px] text-on-surface-variant font-bold">Haz clic para cargar el plato y la cantidad total de ingredientes de esa comida</span>
               </div>
 
               {/* Days Headers */}
@@ -496,15 +500,17 @@ export default function LogisticsMenus({ token }) {
               </h3>
 
               <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 flex flex-col gap-2">
-                <label className="text-[9px] font-black text-on-surface-variant uppercase">Día a calcular</label>
+                <label className="text-[9px] font-black text-on-surface-variant uppercase">Período a solicitar</label>
+                <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setRequirementScope('day')} className={`p-2 rounded-lg text-[10px] font-bold ${requirementScope === 'day' ? 'bg-primary text-on-primary' : 'bg-surface border border-outline-variant'}`}>Por día</button><button type="button" onClick={() => setRequirementScope('week')} className={`p-2 rounded-lg text-[10px] font-bold ${requirementScope === 'week' ? 'bg-primary text-on-primary' : 'bg-surface border border-outline-variant'}`}>Semana completa</button></div>
                 <select
                   value={requirementDay}
                   onChange={e => setRequirementDay(e.target.value)}
+                  disabled={requirementScope === 'week'}
                   className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-bold"
                 >
                   {DAYS.map(day => <option key={day} value={day}>{day}</option>)}
                 </select>
-                <div className="grid grid-cols-3 gap-2 text-center text-[9px] font-bold text-on-surface-variant">
+                <div className="grid grid-cols-2 gap-2 text-center text-[9px] font-bold text-on-surface-variant">
                   <div className="bg-white/70 rounded-lg p-2">
                     <span className="block text-[#0b2347] font-black text-xs">{totalActive}</span>
                     Residentes
@@ -512,10 +518,6 @@ export default function LogisticsMenus({ token }) {
                   <div className="bg-white/70 rounded-lg p-2">
                     <span className="block text-[#0b2347] font-black text-xs">{totalStaff}</span>
                     Personal
-                  </div>
-                  <div className="bg-white/70 rounded-lg p-2">
-                    <span className="block text-[#0b2347] font-black text-xs">{totalDiners}</span>
-                    Raciones
                   </div>
                 </div>
               </div>
@@ -525,7 +527,7 @@ export default function LogisticsMenus({ token }) {
                   <thead>
                     <tr className="border-b border-outline-variant text-on-surface-variant font-bold">
                       <th className="pb-2">Ingrediente</th>
-                      <th className="pb-2 text-center">Total Día</th>
+                      <th className="pb-2 text-center">Total {requirementScope === 'week' ? 'Semana' : 'Día'}</th>
                       <th className="pb-2 text-center">Stock</th>
                       <th className="pb-2 text-right">Faltante</th>
                     </tr>
@@ -552,7 +554,7 @@ export default function LogisticsMenus({ token }) {
                     {missingIngredients.length === 0 && (
                       <tr>
                         <td colSpan="4" className="py-4 text-center italic text-on-surface-variant">
-                          Sin requerimientos para {requirementDay}. Cargue ingredientes por ración en el menú del día.
+                          Sin requerimientos para {requirementScope === 'week' ? 'la semana' : requirementDay}. Cargue las cantidades totales de ingredientes en el menú.
                         </td>
                       </tr>
                     )}
@@ -566,7 +568,7 @@ export default function LogisticsMenus({ token }) {
                   className="w-full py-2 bg-primary text-on-primary font-bold rounded-xl text-xs hover:opacity-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-sm">shopping_cart_checkout</span>
-                  Solicitar Requerimiento Diario
+                  Solicitar Requerimiento {requirementScope === 'week' ? 'Semanal' : 'Diario'}
                 </button>
               )}
             </div>
@@ -711,7 +713,7 @@ export default function LogisticsMenus({ token }) {
                   placeholder="Ej: Arroz: 0.12 kg, Pollo: 0.18 kg, Aceite: 0.02 l&#10;(Cantidad para una sola comida/ración)"
                 />
                 <span className="text-[9px] text-on-surface-variant font-medium mt-1 block leading-tight">
-                  Coloca cantidades para 1 ración. El sistema multiplica por residentes activos + personal de apoyo y genera el requerimiento diario.
+                  Coloque la cantidad total usada para preparar esta comida completa (por ejemplo: 10 kilos de harina, 1 pote de mantequilla, 4 litros de leche). No se multiplica por comensales.
                 </span>
               </div>
 

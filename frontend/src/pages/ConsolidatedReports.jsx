@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { downloadExcel } from '../utils/exportExcel';
 
 const PRIORITY_CONDITIONS = [
   'Niño, Niña o Adolescente (NNA) no acompañado',
@@ -10,6 +11,7 @@ const PRIORITY_CONDITIONS = [
   'Persona con enfermedad crónica o tratamiento permanente',
   'Riesgo de protección / violencia / situación familiar sensible'
 ];
+const isBedOccupied = bed => bed?.resident_id !== null && bed?.resident_id !== undefined;
 
 const COLORS = ['#0b3a75', '#2563eb', '#f59e0b', '#ef4444', '#16a34a', '#7c3aed', '#0891b2', '#db2777'];
 
@@ -213,7 +215,7 @@ const detailPresentation = (type, rows, focus = '', options = {}) => {
     };
   }
   if (type === 'occupancy') {
-    const occupied = rows.filter(row => row.status === 'Ocupada');
+    const occupied = rows.filter(isBedOccupied);
     return {
       search: 'Buscar por sede, pabellón, cama, estado, residente o documento…',
       summary: [
@@ -626,7 +628,7 @@ function SectionHeading({ step, eyebrow, title, description }) {
   );
 }
 
-export default function ConsolidatedReports({ token }) {
+export default function ConsolidatedReports({ token, scopeRefugioId = null }) {
   const today = new Date();
   const monthAgo = new Date(today);
   monthAgo.setDate(today.getDate() - 29);
@@ -643,7 +645,7 @@ export default function ConsolidatedReports({ token }) {
   const [error, setError] = useState('');
 
   const [selectedState, setSelectedState] = useState('');
-  const [selectedRefugioId, setSelectedRefugioId] = useState('');
+  const [selectedRefugioId, setSelectedRefugioId] = useState(scopeRefugioId ? String(scopeRefugioId) : '');
   const [startDate, setStartDate] = useState(monthAgo.toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState(today.toISOString().slice(0, 10));
 
@@ -670,16 +672,18 @@ export default function ConsolidatedReports({ token }) {
     setError('');
     try {
       const headers = { Authorization: `Bearer ${token}` };
-      const refugioList = await fetchJson(`${API_BASE}/refugios`, headers);
+      const allRefugios = await fetchJson(`${API_BASE}/refugios`, headers);
+      const refugioList = scopeRefugioId ? allRefugios.filter(item => Number(item.id) === Number(scopeRefugioId)) : allRefugios;
+      const localPrefix = scopeRefugioId ? `/refugios/${scopeRefugioId}` : '';
       const historicStart = new Date();
       historicStart.setDate(historicStart.getDate() - 120);
       const historicQuery = `start_date=${historicStart.toISOString().slice(0, 10)}&end_date=${new Date().toISOString().slice(0, 10)}`;
 
       const [residentList, incidentList, inventoryList, familyList, donationList, bedGroups, mealGroups] = await Promise.all([
-        fetchJson(`${API_BASE}/damnificados`, headers),
-        fetchJson(`${API_BASE}/incidents`, headers),
-        fetchJson(`${API_BASE}/inventory`, headers),
-        fetchJson(`${API_BASE}/family-groups`, headers),
+        fetchJson(`${API_BASE}/damnificados${scopeRefugioId ? `?refugio_id=${scopeRefugioId}` : ''}`, headers),
+        fetchJson(`${API_BASE}${scopeRefugioId ? `${localPrefix}/incidents` : '/incidents'}`, headers),
+        fetchJson(`${API_BASE}${scopeRefugioId ? `${localPrefix}/inventory` : '/inventory'}`, headers),
+        fetchJson(`${API_BASE}/family-groups${scopeRefugioId ? `?refugio_id=${scopeRefugioId}` : ''}`, headers),
         fetchJson(`${API_BASE}/donations`, headers),
         Promise.all(refugioList.map(refugio => fetchJson(`${API_BASE}/refugios/${refugio.id}/beds`, headers))),
         Promise.all(refugioList.map(refugio => fetchJson(`${API_BASE}/refugios/${refugio.id}/meals/attendance?${historicQuery}`, headers)))
@@ -690,7 +694,7 @@ export default function ConsolidatedReports({ token }) {
       setIncidents(incidentList);
       setInventory(inventoryList);
       setFamilies(familyList);
-      setDonations(donationList);
+      setDonations(scopeRefugioId ? donationList.filter(item => Number(item.refugio_id) === Number(scopeRefugioId)) : donationList);
       setBeds(bedGroups.flat());
       setMeals(mealGroups.flat());
     } catch (err) {
@@ -703,7 +707,7 @@ export default function ConsolidatedReports({ token }) {
 
   useEffect(() => {
     fetchGlobalData();
-  }, [token]);
+  }, [token, scopeRefugioId]);
 
   const states = useMemo(() => [...new Set(refugios.map(item => item.estado).filter(Boolean))].sort(), [refugios]);
 
@@ -731,7 +735,7 @@ export default function ConsolidatedReports({ token }) {
   const scopedDonations = useMemo(() => donations.filter(item => scopedIds.has(Number(item.refugio_id)) && inRange(item.received_at)), [donations, scopedIds, startDate, endDate]);
 
   const totalCapacity = scopedRefugios.reduce((sum, item) => sum + Number(item.capacity || 0), 0);
-  const occupiedBeds = scopedBeds.filter(item => item.status === 'Ocupada').length;
+  const occupiedBeds = scopedBeds.filter(isBedOccupied).length;
   const occupancyRate = percentage(occupiedBeds || scopedResidents.length, scopedBeds.length || totalCapacity);
 
   const ageGroups = [
@@ -823,6 +827,8 @@ export default function ConsolidatedReports({ token }) {
   const alertResidents = scopedResidents.filter(item => item.priorityText || item.pathologies.length || item.health_status === 'Crítico' || item.requiresMedical !== 'No');
   const familyIds = new Set(scopedResidents.map(item => item.family_group_id).filter(Boolean));
   const scopedFamilies = families.filter(item => familyIds.has(item.id));
+  const unipersonalFamilies = scopedResidents.filter(item => !item.family_group_id).length;
+  const activeFamilyCount = scopedFamilies.length + unipersonalFamilies;
 
   const refugioRows = scopedRefugios.map(refugio => {
     const siteResidents = scopedResidents.filter(item => Number(item.refugio_id) === Number(refugio.id));
@@ -833,7 +839,7 @@ export default function ConsolidatedReports({ token }) {
       ...refugio,
       residents: siteResidents,
       residentsCount: siteResidents.length,
-      occupancy: percentage(siteBeds.filter(item => item.status === 'Ocupada').length || siteResidents.length, siteBeds.length || refugio.capacity),
+      occupancy: percentage(siteBeds.filter(isBedOccupied).length, siteBeds.length || refugio.capacity),
       criticalStock: siteCritical.length,
       alerts: siteAlerts,
       risk: Math.min(100, Math.round(siteAlerts * 1.5 + siteCritical * 6 + Math.max(0, percentage(siteResidents.length, refugio.capacity) - 80)))
@@ -929,6 +935,11 @@ export default function ConsolidatedReports({ token }) {
     popup.document.close();
   };
 
+  const exportDetailExcel = () => {
+    if (!detail || !detailView) return;
+    downloadExcel(`reporte-consolidado-${Date.now()}.xls`, ['N°', ...detailView.columns.map(column => column.label)], detailRows.map((row, index) => [index + 1, ...detailView.columns.map(column => display(column.value(row)))]), detail.title);
+  };
+
   const executiveAlerts = [
     undocumented.length > 0 && {
       tone: 'danger', icon: 'badge', title: `${undocumented.length} personas requieren gestión documental`,
@@ -1021,7 +1032,7 @@ export default function ConsolidatedReports({ token }) {
         <section className="report-section">
           <SectionHeading step="1" eyebrow="Panorama" title="¿Cuál es la escala de la operación hoy?" description="La primera lectura dimensiona personas atendidas, presión sobre la capacidad y movimiento del período seleccionado." />
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
-            <MetricCard icon="groups" label="Residentes activos" value={formatNumber(scopedResidents.length)} detail={`${formatNumber(scopedFamilies.length)} familias en ${scopedRefugios.length} sedes`} onClick={() => openResidentDetail('Residentes activos', 'Listado completo del ámbito seleccionado', scopedResidents, 'population')} />
+            <MetricCard icon="groups" label="Residentes activos" value={formatNumber(scopedResidents.length)} detail={`${formatNumber(activeFamilyCount)} familias (incluye ${unipersonalFamilies} unipersonales) en ${scopedRefugios.length} sedes`} onClick={() => openResidentDetail('Residentes activos', 'Listado completo del ámbito seleccionado', scopedResidents, 'population')} />
             <MetricCard icon="person_add" label="Ingresos del período" value={formatNumber(periodResidents.length)} detail={`${percentage(periodResidents.length, scopedResidents.length)}% de la población actual ingresó en estas fechas`} onClick={() => openResidentDetail('Ingresos del período', `${startDate} al ${endDate}`, periodResidents, 'admission')} />
             <MetricCard icon="bed" label="Ocupación" value={`${occupancyRate}%`} detail={`${formatNumber(occupiedBeds || scopedResidents.length)} ocupaciones sobre ${formatNumber(scopedBeds.length || totalCapacity)} plazas`} tone={occupancyRate >= 85 ? 'danger' : 'success'} onClick={() => openResidentDetail('Ocupación y disponibilidad', 'Estado detallado de plazas por sede y pabellón', detailBeds, 'occupancy')} />
             <MetricCard icon="restaurant" label="Raciones servidas" value={formatNumber(scopedMeals.length)} detail={`≈ ${formatNumber(estimatedFoodKg)} kg planificados a 0,55 kg por ración`} tone="warning" onClick={() => openResidentDetail('Raciones servidas y proyección alimentaria', `${startDate} al ${endDate}`, detailMeals, 'meals')} />
@@ -1160,7 +1171,7 @@ export default function ConsolidatedReports({ token }) {
             <MetricCard icon="inventory_2" label="Inventario crítico" value={formatNumber(criticalStock.length)} detail={`${scopedInventory.length} renglones monitoreados`} tone={criticalStock.length ? 'danger' : 'success'} onClick={() => openResidentDetail('Inventario crítico', 'Existencias por debajo del nivel mínimo configurado', criticalStock, 'inventory')} />
             <MetricCard icon="volunteer_activism" label="Donaciones recibidas" value={formatNumber(scopedDonations.length)} detail="Registros dentro del período seleccionado" tone="success" onClick={() => openResidentDetail('Donaciones recibidas', `${startDate} al ${endDate}`, scopedDonations, 'donations')} />
             <MetricCard icon="shield" label="Incidencias" value={formatNumber(scopedIncidents.length)} detail={`${scopedIncidents.filter(item => item.incident_type === 'Emergencia').length} emergencias`} tone={scopedIncidents.length ? 'warning' : 'success'} onClick={() => openResidentDetail('Incidencias operativas', `${startDate} al ${endDate}`, scopedIncidents, 'incidents')} />
-            <MetricCard icon="family_restroom" label="Familias activas" value={formatNumber(scopedFamilies.length)} detail={`${percentage(scopedResidents.filter(item => item.family_group_id).length, scopedResidents.length)}% con grupo familiar`} />
+            <MetricCard icon="family_restroom" label="Familias activas" value={formatNumber(activeFamilyCount)} detail={`${scopedFamilies.length} grupos · ${unipersonalFamilies} familias unipersonales`} />
           </div>
         </section>
 
@@ -1249,7 +1260,7 @@ export default function ConsolidatedReports({ token }) {
 
                 <div className="flex flex-col lg:flex-row justify-between gap-3">
                   <div className="relative flex-1 max-w-2xl"><span className="material-symbols-outlined absolute left-3 top-2.5 text-base text-on-surface-variant">search</span><input value={detailSearch} onChange={event => { setDetailSearch(event.target.value); setDetailPage(1); }} placeholder={detailView.search} className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-outline-variant bg-surface-container-low text-xs" /></div>
-                  <div className="flex items-center gap-2"><span className="text-xs font-black text-primary mr-2">{detailRows.length} registros</span><button onClick={printDetail} className="px-4 py-2.5 rounded-xl bg-primary text-on-primary text-xs font-black inline-flex items-center gap-2"><span className="material-symbols-outlined text-base">picture_as_pdf</span> Descargar PDF</button></div>
+                  <div className="flex items-center gap-2"><span className="text-xs font-black text-primary mr-2">{detailRows.length} registros</span><button onClick={exportDetailExcel} className="px-4 py-2.5 rounded-xl bg-success text-white text-xs font-black inline-flex items-center gap-2"><span className="material-symbols-outlined text-base">table_view</span> Descargar Excel</button><button onClick={printDetail} className="px-4 py-2.5 rounded-xl bg-primary text-on-primary text-xs font-black inline-flex items-center gap-2"><span className="material-symbols-outlined text-base">picture_as_pdf</span> Descargar PDF</button></div>
                 </div>
 
                 {detailFilterOptions.length > 0 && (

@@ -1517,6 +1517,11 @@ export default function Registration({ token }) {
                       <select value={existingFamilyRelationship} onChange={(e) => setExistingFamilyRelationship(e.target.value)} className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none">
                         <option value="Hija/o">Hija/o</option>
                         <option value="Esposa/o o pareja">Esposa/o o pareja</option>
+                        <option value="Suegra/o">Suegra/o</option>
+                        <option value="Tía/o">Tía/o</option>
+                        <option value="Prima/o">Prima/o</option>
+                        <option value="Cuñada/o">Cuñada/o</option>
+                        <option value="Nuera/Yerno">Nuera/Yerno</option>
                         <option value="Madre/Padre">Madre/Padre</option>
                         <option value="Hermana/o">Hermana/o</option>
                         <option value="Nieta/o">Nieta/o</option>

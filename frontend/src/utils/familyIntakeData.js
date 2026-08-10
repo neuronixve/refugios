@@ -1,4 +1,5 @@
 export const EMPTY_FAMILY_INTAKE = {
+  foto_grupo: '',
   fecha_ingreso: '',
   hora_ingreso: '',
   tipo_registro: 'Nuevo',

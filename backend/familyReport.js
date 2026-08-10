@@ -71,6 +71,11 @@ async function buildFamilyReport({ refugio, responsibleName, families }) {
   await workbook.xlsx.readFile(TEMPLATE_PATH);
   const worksheet = workbook.worksheets[0];
 
+  // Anchos calibrados según el contenido real; evita la plantilla con columnas uniformes ilegibles.
+  [6, 22, 31, 16, 14, 12, 8, 25, 17, 10, 10, 36].forEach((width, index) => {
+    worksheet.getColumn(index + 1).width = width;
+  });
+
   const firstStyles = Array.from({ length: 12 }, (_, index) => clone(worksheet.getRow(9).getCell(index + 1).style));
   const middleStyles = Array.from({ length: 12 }, (_, index) => clone(worksheet.getRow(10).getCell(index + 1).style));
   const lastStyles = Array.from({ length: 12 }, (_, index) => clone(worksheet.getRow(14).getCell(index + 1).style));
@@ -128,7 +133,7 @@ async function buildFamilyReport({ refugio, responsibleName, families }) {
         worksheet.getCell(`G${currentRow}`).value = calculateAge(resident.birth_date);
         worksheet.getCell(`G${currentRow}`).numFmt = '0';
         worksheet.getCell(`H${currentRow}`).value = family.isSolo
-          ? 'Persona sola / Sin grupo familiar'
+          ? 'Familia unipersonal'
           : (metadata.es_cabeza_familia ? 'Cabeza de familia' : (metadata.parentesco || 'Familiar'));
         worksheet.getCell(`H${currentRow}`).numFmt = '@';
         worksheet.getCell(`I${currentRow}`).value = metadata.telefono_contacto || null;
@@ -212,7 +217,7 @@ async function buildFamilyReport({ refugio, responsibleName, families }) {
 
   worksheet.mergeCells(`C${solosTotalRow}:H${solosTotalRow}`);
   worksheet.mergeCells(`C${residentsTotalRow}:H${residentsTotalRow}`);
-  worksheet.getCell(`C${solosTotalRow}`).value = 'TOTAL PERSONAS SOLAS / SIN GRUPO FAMILIAR:';
+  worksheet.getCell(`C${solosTotalRow}`).value = 'TOTAL FAMILIAS UNIPERSONALES:';
   worksheet.getCell(`C${residentsTotalRow}`).value = 'TOTAL GENERAL DE RESIDENTES ACTIVOS:';
   worksheet.getCell(`I${solosTotalRow}`).value = soloResidents;
   worksheet.getCell(`I${residentsTotalRow}`).value = totalResidents;

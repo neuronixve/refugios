@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
@@ -52,10 +53,36 @@ export default function MedicationDelivery({ token }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const scannerRef = useRef(null);
 
   useEffect(() => {
     fetchData();
   }, [refugioId]);
+
+  useEffect(() => {
+    if (!scanning) {
+      if (scannerRef.current) scannerRef.current.clear().catch(() => {});
+      scannerRef.current = null;
+      return;
+    }
+    const scanner = new Html5QrcodeScanner('medication-qr-reader', { fps: 10, qrbox: { width: 230, height: 230 } }, false);
+    scanner.render(decodedText => {
+      const parts = decodedText.includes('-') ? decodedText.split('-') : decodedText.split('_');
+      const residentId = parts[0] === 'Sede' && parts[1] === String(refugioId) && parts[2] === 'Residente' ? parseInt(parts[3]) : NaN;
+      const resident = residents.find(item => item.id === residentId);
+      if (!resident) {
+        setError('El QR no corresponde a un residente activo de esta sede.');
+        return;
+      }
+      handleResidentChange(String(resident.id));
+      setSearchTerm(`${resident.first_name} ${resident.last_name}`);
+      setMessage('Residente seleccionado mediante su carnet QR.');
+      setScanning(false);
+    }, () => {});
+    scannerRef.current = scanner;
+    return () => { scanner.clear().catch(() => {}); scannerRef.current = null; };
+  }, [scanning, refugioId, residents]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -243,6 +270,8 @@ export default function MedicationDelivery({ token }) {
                 className="w-full bg-surface-container border border-outline-variant rounded-lg pl-9 pr-3 py-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
               />
             </div>
+            <button type="button" onClick={() => setScanning(value => !value)} className="w-full mb-3 px-3 py-2.5 border border-primary text-primary rounded-lg text-xs font-bold inline-flex items-center justify-center gap-2"><span className="material-symbols-outlined text-sm">qr_code_scanner</span>{scanning ? 'Cerrar escáner QR' : 'Escanear carnet QR'}</button>
+            {scanning && <div className="mb-4 rounded-xl border border-outline-variant overflow-hidden"><div id="medication-qr-reader" /></div>}
             <div className="flex flex-col gap-2 max-h-[520px] overflow-y-auto pr-1 custom-scrollbar">
               {filteredResidents.map(res => {
                 const isActive = String(res.id) === String(selectedResidentId);

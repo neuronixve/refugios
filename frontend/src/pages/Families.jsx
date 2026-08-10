@@ -4,6 +4,26 @@ import FamilyIntakeForm from '../components/FamilyIntakeForm';
 import { normalizeFamilyIntake } from '../utils/familyIntakeData';
 import { printFamilyIntake } from '../utils/familyIntakePrint';
 
+const compressFamilyPhoto = file => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onerror = reject;
+  reader.onload = () => {
+    const image = new Image();
+    image.onerror = reject;
+    image.onload = () => {
+      const maxWidth = 900;
+      const scale = Math.min(1, maxWidth / image.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(image.width * scale);
+      canvas.height = Math.round(image.height * scale);
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.78));
+    };
+    image.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+
 export default function Families({ token }) {
   const { refugioId } = useParams();
   const navigate = useNavigate();
@@ -29,6 +49,9 @@ export default function Families({ token }) {
   const [linkRelationship, setLinkRelationship] = useState('Esposa/o o pareja');
   const [linkingResident, setLinkingResident] = useState(false);
   const [linkFeedback, setLinkFeedback] = useState({ type: '', text: '' });
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [auditLog, setAuditLog] = useState([]);
+  const [showAudit, setShowAudit] = useState(false);
 
   const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
@@ -40,7 +63,7 @@ export default function Families({ token }) {
     setLoading(true);
     setError('');
     try {
-      const response = await fetch(`${API_BASE}/family-groups?refugio_id=${refugioId}`, { headers: authHeaders });
+      const response = await fetch(`${API_BASE}/family-groups?refugio_id=${refugioId}&include_deleted=${showDeleted}`, { headers: authHeaders });
       if (!response.ok) throw new Error('No se pudo obtener el listado de familias.');
       setFamilies(await response.json());
     } catch (err) {
@@ -50,7 +73,40 @@ export default function Families({ token }) {
     }
   };
 
-  useEffect(() => { fetchFamilies(); }, [refugioId]);
+  useEffect(() => { fetchFamilies(); }, [refugioId, showDeleted]);
+
+  const deleteFamily = async family => {
+    if (!window.confirm(`¿Eliminar la familia "${family.family_name}"? Sus residentes no se borrarán y la familia podrá restaurarse.`)) return;
+    const response = await fetch(`${API_BASE}/family-groups/${family.id}`, { method: 'DELETE', headers: authHeaders });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return setError(data.error || 'No se pudo eliminar la familia.');
+    setMessage(data.message);
+    setSelectedFamily(null);
+    fetchFamilies();
+  };
+
+  const restoreFamily = async family => {
+    const response = await fetch(`${API_BASE}/family-groups/${family.id}/restore`, { method: 'PUT', headers: authHeaders });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return setError(data.error || 'No se pudo restaurar la familia.');
+    setMessage(data.message);
+    fetchFamilies();
+  };
+
+  const openAuditLog = async family => {
+    const response = await fetch(`${API_BASE}/family-groups/${family.id}/audit`, { headers: authHeaders });
+    if (!response.ok) return setError('No se pudo cargar la trazabilidad de la ficha.');
+    setAuditLog(await response.json());
+    setShowAudit(true);
+  };
+
+  const handleFamilyPhoto = async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return setError('Seleccione un archivo de imagen válido.');
+    const foto_grupo = await compressFamilyPhoto(file);
+    setFamilyIntake(current => ({ ...current, foto_grupo }));
+  };
 
   const filteredFamilies = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -320,10 +376,12 @@ export default function Families({ token }) {
           <h2 className="text-2xl font-extrabold text-primary">Familias Registradas</h2>
           <p className="text-xs text-on-surface-variant">Consulte, corrija y amplíe los núcleos familiares del campamento temporal.</p>
         </div>
-        <button type="button" onClick={exportFamilies} disabled={exporting || loading} className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-primary text-on-primary border border-primary rounded-lg text-xs font-bold shadow-sm hover:opacity-90 disabled:opacity-50 transition-opacity">
+        <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setShowDeleted(value => !value)} className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-surface border border-primary text-primary rounded-lg text-xs font-bold">
+          <span className="material-symbols-outlined text-base">{showDeleted ? 'groups' : 'restore_from_trash'}</span>{showDeleted ? 'Ver familias activas' : 'Ver familias eliminadas'}
+        </button><button type="button" onClick={exportFamilies} disabled={exporting || loading || showDeleted} className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-primary text-on-primary border border-primary rounded-lg text-xs font-bold shadow-sm hover:opacity-90 disabled:opacity-50 transition-opacity">
           <span className="material-symbols-outlined text-base">download</span>
           {exporting ? 'Generando Excel...' : 'Exportar reporte Excel'}
-        </button>
+        </button></div>
       </header>
 
       {error && <div className="mb-5 p-4 bg-error-container/20 border border-error/25 text-error rounded-xl text-xs font-semibold">{error}</div>}
@@ -346,7 +404,7 @@ export default function Families({ token }) {
             <article key={family.id} className={`bg-surface-container-lowest border rounded-2xl p-5 shadow-xs ${family.pets_count > 0 ? 'border-success/50 ring-1 ring-success/10' : 'border-outline-variant'}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <div className="w-10 h-10 bg-primary/10 text-primary rounded-xl flex items-center justify-center"><span className="material-symbols-outlined">family_restroom</span></div>
+                  <div className="w-12 h-12 bg-primary/10 text-primary rounded-xl flex items-center justify-center overflow-hidden">{family.intake_data?.foto_grupo ? <img src={family.intake_data.foto_grupo} alt="Grupo familiar" className="w-full h-full object-cover" /> : <span className="material-symbols-outlined">family_restroom</span>}</div>
                   {family.pets_count > 0 && (
                     <span className="inline-flex items-center gap-1 px-2 py-1 bg-success/10 text-success border border-success/20 rounded-full text-[9px] font-extrabold uppercase tracking-wide">
                       <span className="material-symbols-outlined text-xs">pets</span>
@@ -359,17 +417,18 @@ export default function Families({ token }) {
               <h3 className="mt-4 text-sm font-extrabold text-on-surface">{family.family_name}</h3>
               <p className="mt-1 text-[10px] text-on-surface-variant">Total histórico: {family.total_members} personas · {family.pets_count || 0} {(family.pets_count || 0) === 1 ? 'mascota' : 'mascotas'} · Espacio: {family.block_assignment || 'Sin asignar'}</p>
               <div className="mt-5 grid grid-cols-2 gap-2">
-                <button onClick={() => openFamily(family)} className="px-3 py-2 border border-primary text-primary rounded-lg text-[10px] font-bold">Ver y editar</button>
-                <button onClick={() => navigate(`/refugio/${refugioId}/registro?family_group_id=${family.id}`)} className="px-3 py-2 bg-primary text-on-primary rounded-lg text-[10px] font-bold">Añadir miembro</button>
+                {showDeleted ? <button onClick={() => restoreFamily(family)} className="col-span-2 px-3 py-2 bg-success text-white rounded-lg text-[10px] font-bold">Restaurar familia</button> : <><button onClick={() => openFamily(family)} className="px-3 py-2 border border-primary text-primary rounded-lg text-[10px] font-bold">Ver y editar</button>
+                <button onClick={() => navigate(`/refugio/${refugioId}/registro?family_group_id=${family.id}`)} className="px-3 py-2 bg-primary text-on-primary rounded-lg text-[10px] font-bold">Añadir miembro</button></>}
                 <button
                   type="button"
                   onClick={() => printFamily(family)}
                   disabled={printingFamilyId === family.id}
-                  className="col-span-2 px-3 py-2 border border-primary bg-primary/5 text-primary rounded-lg text-[10px] font-extrabold inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className={`${showDeleted ? 'hidden' : 'col-span-2'} px-3 py-2 border border-primary bg-primary/5 text-primary rounded-lg text-[10px] font-extrabold inline-flex items-center justify-center gap-1.5 disabled:opacity-50`}
                 >
                   <span className="material-symbols-outlined text-sm">print</span>
                   {printingFamilyId === family.id ? 'Generando planilla...' : 'Generar e imprimir planilla'}
                 </button>
+                {!showDeleted && <button type="button" onClick={() => deleteFamily(family)} className="col-span-2 px-3 py-2 border border-error text-error rounded-lg text-[10px] font-extrabold inline-flex items-center justify-center gap-1"><span className="material-symbols-outlined text-sm">delete</span>Eliminar familia</button>}
               </div>
             </article>
           ))}
@@ -403,12 +462,17 @@ export default function Families({ token }) {
               </div>
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
                 <p className="text-[10px] font-extrabold uppercase tracking-wide text-primary">Responsable del registro</p>
-                <p className="mt-1 text-xs font-bold text-on-surface">{selectedFamily.registered_by_name || selectedFamily.updated_by_name || 'Se asignará al guardar o actualizar'}</p>
+                <p className="mt-1 text-xs font-bold text-on-surface">Última edición: {selectedFamily.updated_by_name || selectedFamily.registered_by_name || 'Se asignará al guardar o actualizar'}</p>
                 <p className="text-[10px] text-on-surface-variant">
                   {selectedFamily.registered_by_document ? `C.I. ${selectedFamily.registered_by_document}` : 'Documento no registrado'}
                   {' · '}
                   {selectedFamily.registered_by_function || 'Función no indicada'}
                 </p>
+                <button type="button" onClick={() => openAuditLog(selectedFamily)} className="mt-3 px-3 py-2 border border-primary text-primary rounded-lg text-[10px] font-bold">Ver trazabilidad completa</button>
+              </div>
+              <div className="rounded-xl border border-outline-variant p-4 flex flex-col sm:flex-row gap-4 items-start">
+                <div className="w-36 h-28 rounded-xl bg-surface-container overflow-hidden flex items-center justify-center shrink-0">{familyIntake.foto_grupo ? <img src={familyIntake.foto_grupo} alt="Foto del grupo familiar" className="w-full h-full object-cover" /> : <span className="material-symbols-outlined text-4xl text-on-surface-variant">add_a_photo</span>}</div>
+                <div><p className="text-xs font-extrabold text-primary">Foto del grupo familiar</p><p className="text-[10px] text-on-surface-variant mb-3">Se mostrará en la ficha impresa de esta familia.</p><input type="file" accept="image/*" onChange={handleFamilyPhoto} className="text-[10px]" />{familyIntake.foto_grupo && <button type="button" onClick={() => setFamilyIntake(current => ({ ...current, foto_grupo: '' }))} className="block mt-2 text-[10px] font-bold text-error">Quitar foto</button>}</div>
               </div>
               <div>
                 <div className="mb-3">
@@ -516,6 +580,11 @@ export default function Families({ token }) {
                             <option value="Madre/Padre">Madre/Padre</option>
                             <option value="Hermana/o">Hermana/o</option>
                             <option value="Nieta/o">Nieta/o</option>
+                            <option value="Suegra/o">Suegra/o</option>
+                            <option value="Tía/o">Tía/o</option>
+                            <option value="Prima/o">Prima/o</option>
+                            <option value="Cuñada/o">Cuñada/o</option>
+                            <option value="Nuera/Yerno">Nuera/Yerno</option>
                             <option value="Otro familiar">Otro familiar</option>
                           </select>
                         </label>
@@ -575,10 +644,13 @@ export default function Families({ token }) {
                   <button type="button" disabled={merging || !mergeTargetId} onClick={mergeFamily} className="px-4 py-2.5 bg-warning text-on-surface rounded-lg text-xs font-bold disabled:opacity-50">{merging ? 'Unificando...' : 'Unificar familias'}</button>
                 </div>
               </div>
+              <button type="button" onClick={() => deleteFamily(selectedFamily)} className="px-4 py-3 border border-error text-error rounded-lg text-xs font-extrabold">Eliminar familia</button>
             </div>
           </div>
         </div>
       )}
+
+      {showAudit && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"><div className="bg-surface rounded-2xl border border-outline-variant w-full max-w-2xl p-6 max-h-[80vh] overflow-y-auto"><div className="flex justify-between mb-4"><div><h3 className="text-lg font-extrabold text-primary">Trazabilidad de la ficha familiar</h3><p className="text-[10px] text-on-surface-variant">Usuarios, fecha y hora de cada modificación.</p></div><button onClick={() => setShowAudit(false)}><span className="material-symbols-outlined">close</span></button></div><div className="space-y-2">{auditLog.map(entry => <div key={entry.id} className="border border-outline-variant rounded-xl p-3"><div className="flex justify-between gap-3"><p className="text-xs font-bold">{entry.user_name || 'Usuario no disponible'}</p><span className="text-[9px] font-bold text-primary">{entry.action}</span></div><p className="text-[10px] text-on-surface-variant">{new Date(entry.created_at).toLocaleString('es-VE')} · {entry.user_function || 'Función no registrada'} · C.I. {entry.user_document || 'N/T'}</p></div>)}{auditLog.length === 0 && <p className="text-xs text-on-surface-variant">Aún no hay eventos registrados.</p>}</div></div></div>}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
+import { downloadExcel } from '../utils/exportExcel';
 
 export default function Reports({ token }) {
   const { refugioId } = useParams();
@@ -31,8 +32,8 @@ export default function Reports({ token }) {
     kids3_5: { total: 0, M: 0, F: 0 },   // Preescolar
     kids6_11: { total: 0, M: 0, F: 0 },  // Primaria
     kids12_17: { total: 0, M: 0, F: 0 }, // Secundaria
-    adults: 0,
-    elderly: 0,
+    adults: { total: 0, M: 0, F: 0 },
+    elderly: { total: 0, M: 0, F: 0 },
     totalSchoolAge: 0,
     schooled: 0,
     notSchooled: 0,
@@ -131,6 +132,10 @@ export default function Reports({ token }) {
   const handlePrint = () => {
     window.print();
   };
+  const handleExcel = () => downloadExcel(`reporte-consolidado-sede-${refugioId}.xls`,
+    ['Nombre', 'Cédula', 'Sexo', 'Fecha de nacimiento', 'Estado de salud', 'Familia'],
+    getFilteredResidents().map(r => [`${r.first_name} ${r.last_name}`.toUpperCase(), r.document_id || 'N/T', r.gender || 'N/T', r.birth_date ? r.birth_date.split('T')[0] : 'N/T', r.health_status || 'N/T', r.family_name || 'Familia unipersonal']),
+    'Reporte consolidado de sede');
 
   const printModalList = () => {
     const printContent = document.getElementById('modal-print-area').innerHTML;
@@ -214,8 +219,8 @@ export default function Reports({ token }) {
     let kids3_5 = { total: 0, M: 0, F: 0 };
     let kids6_11 = { total: 0, M: 0, F: 0 };
     let kids12_17 = { total: 0, M: 0, F: 0 };
-    let adults = 0;
-    let elderly = 0;
+    let adults = { total: 0, M: 0, F: 0 };
+    let elderly = { total: 0, M: 0, F: 0 };
 
     let totalSchoolAge = 0;
     let schooled = 0;
@@ -340,12 +345,15 @@ export default function Reports({ token }) {
             else kids12_17.F++;
           }
         } else if (age >= 60) {
-          elderly++;
+          elderly.total++;
+          if (r.gender === 'Masculino') elderly.M++; else if (r.gender === 'Femenino') elderly.F++;
         } else {
-          adults++;
+          adults.total++;
+          if (r.gender === 'Masculino') adults.M++; else if (r.gender === 'Femenino') adults.F++;
         }
       } else {
-        adults++; // fallback
+        adults.total++; // fallback sin fecha
+        if (r.gender === 'Masculino') adults.M++; else if (r.gender === 'Femenino') adults.F++;
       }
     });
 
@@ -649,6 +657,7 @@ export default function Reports({ token }) {
             <span className="material-symbols-outlined text-xs">picture_as_pdf</span>
             Exportar a PDF / Imprimir
           </button>
+          <button onClick={handleExcel} className="px-3.5 py-1.5 bg-success text-on-success text-[10px] font-black uppercase rounded-lg flex items-center gap-1"><span className="material-symbols-outlined text-xs">table_view</span>Exportar Excel</button>
           <button 
             onClick={fetchAllData}
             className="px-3 py-1.5 bg-primary text-on-primary text-[10px] font-black uppercase rounded-lg hover:opacity-90 transition-all flex items-center gap-1 cursor-pointer"
@@ -1050,7 +1059,7 @@ export default function Reports({ token }) {
             <div className="lg:col-span-7 bg-surface-container-lowest border border-outline-variant p-6 rounded-2xl shadow-xs flex flex-col gap-4">
               <h3 className="text-xs font-bold text-on-surface uppercase tracking-wider flex items-center gap-1.5 border-b border-outline-variant/30 pb-3">
                 <span className="material-symbols-outlined text-sm text-primary no-print">child_care</span>
-                Distribución Demográfica de Menores de Edad
+                Distribución Demográfica por Grupos Etarios
               </h3>
               
               <div className="overflow-x-auto">
@@ -1058,8 +1067,8 @@ export default function Reports({ token }) {
                   <thead>
                     <tr className="border-b border-outline-variant text-on-surface-variant font-bold">
                       <th className="pb-3">Rango de Edad / Categoría</th>
-                      <th className="pb-3 text-center">Femenino (Niñas)</th>
-                      <th className="pb-3 text-center">Masculino (Niños)</th>
+                      <th className="pb-3 text-center">Femenino</th>
+                      <th className="pb-3 text-center">Masculino</th>
                       <th className="pb-3 text-right">Total Categoría</th>
                     </tr>
                   </thead>
@@ -1071,6 +1080,14 @@ export default function Reports({ token }) {
                       <td className="py-3 text-center font-bold text-primary">{stats.kids0_2.F}</td>
                       <td className="py-3 text-center font-bold text-primary">{stats.kids0_2.M}</td>
                       <td className="py-3 text-right font-black text-on-surface">{stats.kids0_2.total}</td>
+                    </tr>
+                    <tr className="border-b border-outline-variant/30 hover:bg-surface-container-low/35 transition-all">
+                      <td className="py-3 font-semibold text-on-surface">👥 Adultos <span className="text-[10px] text-on-surface-variant font-normal">(18-59 años)</span></td>
+                      <td className="py-3 text-center font-bold text-primary">{stats.adults.F}</td><td className="py-3 text-center font-bold text-primary">{stats.adults.M}</td><td className="py-3 text-right font-black">{stats.adults.total}</td>
+                    </tr>
+                    <tr className="border-b border-outline-variant/30 hover:bg-surface-container-low/35 transition-all">
+                      <td className="py-3 font-semibold text-on-surface">🧓 Adultos mayores <span className="text-[10px] text-on-surface-variant font-normal">(60 años o más)</span></td>
+                      <td className="py-3 text-center font-bold text-primary">{stats.elderly.F}</td><td className="py-3 text-center font-bold text-primary">{stats.elderly.M}</td><td className="py-3 text-right font-black">{stats.elderly.total}</td>
                     </tr>
                     <tr className="border-b border-outline-variant/30 hover:bg-surface-container-low/35 transition-all">
                       <td className="py-3 font-semibold text-on-surface flex items-center gap-1">

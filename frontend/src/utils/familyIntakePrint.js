@@ -112,9 +112,9 @@ export function buildFamilyIntakeHtml({ family, members = [], refugio, assetBase
     || members[0];
   const representativeMeta = parseMetadata(representative);
   const personPlan = representativeMeta.planilla_persona || {};
-  const professional = family.registered_by_name || family.updated_by_name || '';
-  const professionalDocument = family.registered_by_document || '';
-  const professionalFunction = family.registered_by_function || 'Profesional OAC';
+  const professional = family.updated_by_name || family.registered_by_name || '';
+  const professionalDocument = family.updated_by_document || family.registered_by_document || '';
+  const professionalFunction = family.updated_by_function || family.registered_by_function || 'Profesional OAC';
   const entryDate = data.fecha_ingreso || String(family.created_at || '').slice(0, 10);
   const logoUrl = `${assetBase}/logo-saren-planilla.jpeg`;
 
@@ -173,6 +173,7 @@ export function buildFamilyIntakeHtml({ family, members = [], refugio, assetBase
     .header td { border: 0.65pt solid #111; }
     .header-logo { width: 1.25in; background: white; text-align: center; padding: 0.025in; }
     .header-logo img { width: 0.95in; height: 0.76in; object-fit: fill; display: inline-block; }
+    .family-photo { width: 1.35in; height: 0.9in; object-fit: cover; border: 0.55pt solid #111; }
     .header-copy { background: #dbe8f4; text-align: center; vertical-align: middle; padding: 0.035in 0.06in; }
     .header-copy h1 { margin: 0; color: #1f4e79; font-size: 12.5pt; line-height: 1.02; font-weight: 700; }
     .header-copy .subtitle { margin-top: 0.035in; font-size: 8.5pt; font-style: italic; }
@@ -227,6 +228,7 @@ export function buildFamilyIntakeHtml({ family, members = [], refugio, assetBase
     <p class="instruction"><strong>Instrucción de llenado:</strong> registre información clara, verificable y legible. Cuando no aplique, marque N/A; cuando la persona no sepa, marque NS; cuando no responda, marque NR. La condición de vivienda es referida por la familia y no sustituye inspección técnica.</p>
 
     <h2>1. DATOS DE CONTROL DEL INGRESO FAMILIAR</h2>
+    ${data.foto_grupo ? `<div style="text-align:right;margin-bottom:.04in"><img class="family-photo" src="${data.foto_grupo}" alt="Foto del grupo familiar" /></div>` : ''}
     <table class="form compact">
       <colgroup><col style="width:17.5%"><col style="width:31.8%"><col style="width:17.5%"><col style="width:33.2%"></colgroup>
       <tr><td class="label">ID Familiar / Código</td><td>HOG-${shown(family.id)}</td><td class="label">Fecha de ingreso</td><td>${filled(formatDate(entryDate))}</td></tr>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { csvDateStamp, downloadCsv } from '../utils/exportCsv';
+import { downloadExcel } from '../utils/exportExcel';
 import PriorityConditionSelector from '../components/PriorityConditionSelector';
 
 const VENEZUELA_STATES = [
@@ -31,6 +32,15 @@ const compressImage = (file) => {
       };
     };
   });
+};
+
+const calculateAge = birthDate => {
+  if (!birthDate) return null;
+  const birth = new Date(birthDate);
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--;
+  return age >= 0 ? age : null;
 };
 
 export default function Residents({ token }) {
@@ -280,6 +290,14 @@ export default function Residents({ token }) {
       ['N°', 'Nombre completo', 'Cédula', 'Sexo', 'Fecha de nacimiento', 'Cama / espacio', 'Grupo familiar', 'Cabeza de familia', 'Parentesco', 'Estado de salud', 'Teléfono', 'Contacto de emergencia', 'Estado'],
       rows
     );
+  };
+
+  const handleExportExcel = () => {
+    const active = residents.filter(resident => resident.status === 'Activo');
+    downloadExcel(`residentes-activos-${csvDateStamp()}.xls`,
+      ['N°', 'Nombre completo', 'Cédula', 'Sexo', 'Edad', 'Fecha de nacimiento', 'Cama / espacio', 'Grupo familiar', 'Salud'],
+      active.map((resident, index) => [index + 1, `${resident.first_name} ${resident.last_name}`.toUpperCase(), resident.document_id || 'N/T', resident.gender || 'N/T', calculateAge(resident.birth_date) ?? 'N/T', resident.birth_date ? resident.birth_date.split('T')[0] : 'N/T', resident.bedInfo, resident.family_name || 'Familia unipersonal', resident.health_status || 'N/T']),
+      'Listado de residentes activos');
   };
 
   const updateResident = async (resident, overrides = {}) => fetch(`${API_BASE}/damnificados/${resident.id}`, {
@@ -662,6 +680,7 @@ export default function Residents({ token }) {
           <button onClick={handleExportCsv} className="px-4 py-2.5 border border-primary text-primary rounded-lg text-xs font-bold flex items-center gap-2">
             <span className="material-symbols-outlined text-base">csv</span> Descargar CSV
           </button>
+          <button onClick={handleExportExcel} className="px-4 py-2.5 border border-success text-success rounded-lg text-xs font-bold flex items-center gap-2"><span className="material-symbols-outlined text-base">table_view</span> Descargar Excel</button>
           <button onClick={handleExportPdf} className="px-4 py-2.5 bg-primary text-on-primary rounded-lg text-xs font-bold flex items-center gap-2">
             <span className="material-symbols-outlined text-base">picture_as_pdf</span> Descargar listado PDF
           </button>
@@ -925,6 +944,7 @@ export default function Residents({ token }) {
                   <span className="text-[10px] text-on-surface-variant block uppercase font-bold mb-1">Identificación y Género</span>
                   <p><strong>Género:</strong> {selectedResident.gender}</p>
                   <p><strong>F. Nacimiento:</strong> {selectedResident.birth_date ? selectedResident.birth_date.split('T')[0] : 'N/T'}</p>
+                  <p><strong>Edad:</strong> {calculateAge(selectedResident.birth_date) !== null ? `${calculateAge(selectedResident.birth_date)} años` : 'N/T'}</p>
                   {(() => {
                     let meta = {};
                     try {

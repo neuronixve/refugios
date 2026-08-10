@@ -326,6 +326,12 @@ export default function Inventory({ token, tab }) {
   }).length;
 
   const stockAlerts = inventory.filter(i => i.quantity <= i.min_threshold).length;
+  const deliverableInventory = inventory.filter(item => {
+    const category = String(item.category || '').toLowerCase();
+    const deposito = String(item.deposito_name || '').toLowerCase();
+    return !['alimentos', 'alimento', 'medicinas', 'medicina'].includes(category)
+      && !deposito.includes('cocina') && !deposito.includes('médico') && !deposito.includes('medico') && !deposito.includes('salud');
+  });
 
   // Pagination calculations for Warehouse Stock
   const consolidatedList = getConsolidatedInventory();
@@ -622,7 +628,6 @@ export default function Inventory({ token, tab }) {
                     className="w-full bg-surface-container-low border border-outline-variant rounded-xl p-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
                   >
                     <option value="Entrega Periódica (Quincenal)">Entrega Periódica (Quincenal)</option>
-                    <option value="Emergencia Médica">Emergencia Médica</option>
                     <option value="Ingreso Inicial">Ingreso Inicial al Centro</option>
                     <option value="Apoyo Extraordinario">Apoyo Extraordinario</option>
                   </select>
@@ -661,7 +666,7 @@ export default function Inventory({ token, tab }) {
                   </thead>
                   <tbody>
                     {deliveryItems.map((dItem, index) => {
-                      const currentInvItem = inventory.find(i => i.item_name === dItem.item_name);
+                      const currentInvItem = deliverableInventory.find(i => i.item_name === dItem.item_name);
                       const isLowStock = currentInvItem && currentInvItem.quantity <= currentInvItem.min_threshold;
                       
                       return (
@@ -675,7 +680,7 @@ export default function Inventory({ token, tab }) {
                               className="bg-surface-container-lowest border border-outline-variant rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary w-full max-w-[200px]"
                             >
                               <option value="">-- Seleccionar --</option>
-                              {inventory.map(i => (
+                              {deliverableInventory.map(i => (
                                 <option key={i.id} value={i.item_name} disabled={i.quantity <= 0}>
                                   {i.item_name} {i.quantity <= 0 ? '(Agotado)' : ''}
                                 </option>

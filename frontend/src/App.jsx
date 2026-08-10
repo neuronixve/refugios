@@ -285,7 +285,9 @@ export default function App() {
   const LogisticsMenusWrapper = () => <LogisticsMenus token={token} />;
   const LogisticsAttendanceWrapper = () => <LogisticsAttendance token={token} />;
   const InventarioCocinaWrapper = () => <InventarioCocina token={token} user={user} />;
-  const ReportsWrapper = () => <Reports token={token} />;
+  const ReportsWrapper = () => user?.role === 'gerente'
+    ? <ConsolidatedReports token={token} scopeRefugioId={selectedRefugio?.id} />
+    : <Reports token={token} />;
   const ConfiguracionWrapper = () => <Configuracion token={token} user={user} />;
   const ResidentsWrapper = () => <Residents token={token} />;
   const FamiliesWrapper = () => <Families token={token} />;

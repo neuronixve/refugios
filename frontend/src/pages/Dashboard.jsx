@@ -8,12 +8,13 @@ export default function Dashboard({ token, selectedRefugio }) {
   const [activeTab, setActiveTab] = useState('resumen'); // 'resumen', 'salud', 'socio'
 
   // General counts
-  const [stats, setStats] = useState({ residentsCount: 0, bedsAvailable: 0, criticalItemsCount: 0, healthCriticalCount: 0 });
+  const [stats, setStats] = useState({ residentsCount: 0, bedsAvailable: 0, bedsOccupied: 0, bedsTotal: 0, criticalItemsCount: 0, healthCriticalCount: 0 });
   const [criticalItems, setCriticalItems] = useState([]);
   const [healthDistribution, setHealthDistribution] = useState({ Stable: 0, Observation: 0, Critical: 0 });
 
   // Detailed indicators from JSON metadata
   const [demographics, setDemographics] = useState({ male: 0, female: 0, other: 0 });
+  const [ageGroups, setAgeGroups] = useState({ minors: 0, adults: 0, elderly: 0 });
   const [chronicConditions, setChronicConditions] = useState({ 
     diabetes: 0, 
     hypertension: 0, 
@@ -63,7 +64,9 @@ export default function Dashboard({ token, selectedRefugio }) {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const beds = resBeds.ok ? await resBeds.json() : [];
-      const bedsAvailable = beds.filter(b => b.status === 'Disponible').length;
+      const isOccupiedBed = bed => bed.resident_id !== null && bed.resident_id !== undefined;
+      const bedsOccupied = beds.filter(isOccupiedBed).length;
+      const bedsAvailable = beds.filter(b => !isOccupiedBed(b) && String(b.status || '').trim().toLowerCase() === 'disponible').length;
 
       // 3. Get inventory
       const resInventory = await fetch(`${API_BASE}/refugios/${refugioId}/inventory`, {
@@ -90,8 +93,18 @@ export default function Dashboard({ token, selectedRefugio }) {
       let countWithPets = 0;
       let petsList = [];
       let totalMinorsCount = 0;
+      let minorsAgeCount = 0, adultsAgeCount = 0, elderlyAgeCount = 0;
 
       activeResidents.forEach(r => {
+        if (r.birth_date) {
+          const birth = new Date(r.birth_date);
+          const now = new Date();
+          let age = now.getFullYear() - birth.getFullYear();
+          if (now.getMonth() < birth.getMonth() || (now.getMonth() === birth.getMonth() && now.getDate() < birth.getDate())) age--;
+          if (age < 18) minorsAgeCount++;
+          else if (age >= 60) elderlyAgeCount++;
+          else adultsAgeCount++;
+        } else adultsAgeCount++;
         // Gender demographics
         if (r.gender === 'Masculino') countMale++;
         else if (r.gender === 'Femenino') countFemale++;
@@ -197,7 +210,9 @@ export default function Dashboard({ token, selectedRefugio }) {
       // Update state states
       setStats({
         residentsCount: activeResidents.length,
-        bedsAvailable: beds.length > 0 ? bedsAvailable : (selectedRefugio ? (selectedRefugio.capacity - activeResidents.length) : 0),
+        bedsAvailable,
+        bedsOccupied,
+        bedsTotal: beds.length,
         criticalItemsCount: critItems.length,
         healthCriticalCount: critical + observation
       });
@@ -206,6 +221,7 @@ export default function Dashboard({ token, selectedRefugio }) {
       setHealthDistribution({ Stable: stable, Observation: observation, Critical: critical });
 
       setDemographics({ male: countMale, female: countFemale, other: countOtherGender });
+      setAgeGroups({ minors: minorsAgeCount, adults: adultsAgeCount, elderly: elderlyAgeCount });
       setChronicConditions({ 
         diabetes: countDiabetes, 
         hypertension: countHypertension, 
@@ -243,8 +259,8 @@ export default function Dashboard({ token, selectedRefugio }) {
     }
   };
 
-  const occupancyPercent = selectedRefugio && selectedRefugio.capacity > 0
-    ? Math.round((stats.residentsCount / selectedRefugio.capacity) * 100)
+  const occupancyPercent = stats.bedsTotal > 0
+    ? Math.round((stats.bedsOccupied / stats.bedsTotal) * 100)
     : 0;
 
   return (
@@ -360,7 +376,7 @@ export default function Dashboard({ token, selectedRefugio }) {
                   <div className="flex-1 w-full flex flex-col gap-3">
                     <div className="flex justify-between items-center text-xs font-bold">
                       <span className="text-on-surface-variant">Capacidad Máxima Configurada:</span>
-                      <span className="text-on-surface">{selectedRefugio ? selectedRefugio.capacity : 0} camas</span>
+                      <span className="text-on-surface">{stats.bedsTotal} camas configuradas</span>
                     </div>
                     <div className="w-full h-2 bg-secondary-container rounded-full overflow-hidden">
                       <div className="bg-primary h-full transition-all duration-500" style={{ width: `${Math.min(100, occupancyPercent)}%` }}></div>
@@ -368,7 +384,7 @@ export default function Dashboard({ token, selectedRefugio }) {
                     <div className="grid grid-cols-2 gap-4 mt-2">
                       <div className="border border-outline-variant p-3 rounded-lg text-center">
                         <span className="text-xs text-on-surface-variant block font-bold">Camas Asignadas</span>
-                        <span className="text-lg font-bold text-primary">{stats.residentsCount}</span>
+                        <span className="text-lg font-bold text-primary">{stats.bedsOccupied}</span>
                       </div>
                       <div className="border border-outline-variant p-3 rounded-lg text-center">
                         <span className="text-xs text-on-surface-variant block font-bold">Camas Libres</span>
@@ -393,6 +409,11 @@ export default function Dashboard({ token, selectedRefugio }) {
                     <div className="w-full h-2 bg-secondary-container rounded-full overflow-hidden">
                       <div className="bg-primary h-full" style={{ width: `${stats.residentsCount > 0 ? (demographics.female / stats.residentsCount) * 100 : 0}%` }}></div>
                     </div>
+                  </div>
+                  <div className="border-t border-outline-variant pt-3 grid grid-cols-3 gap-2 text-center">
+                    <div><span className="block text-lg font-extrabold text-primary">{ageGroups.minors}</span><span className="text-[9px] font-bold text-on-surface-variant">Menores</span></div>
+                    <div><span className="block text-lg font-extrabold text-primary">{ageGroups.adults}</span><span className="text-[9px] font-bold text-on-surface-variant">Adultos 18-59</span></div>
+                    <div><span className="block text-lg font-extrabold text-primary">{ageGroups.elderly}</span><span className="text-[9px] font-bold text-on-surface-variant">Adultos mayores 60+</span></div>
                   </div>
 
                   <div>

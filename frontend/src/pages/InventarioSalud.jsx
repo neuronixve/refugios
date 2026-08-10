@@ -187,6 +187,18 @@ export default function InventarioSalud({ token }) {
     }
   };
 
+  const handleDeleteItem = async item => {
+    if (!window.confirm(`¿Eliminar el insumo médico "${item.item_name}"? Esta acción no elimina el historial de entregas.`)) return;
+    setError('');
+    const res = await fetch(`${API_BASE}/refugios/${refugioId}/health-inventory/${item.id}`, {
+      method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return setError(data.error || 'No se pudo eliminar el insumo médico.');
+    setMessage(data.message || 'Insumo médico eliminado.');
+    fetchData();
+  };
+
   const filteredInventory = inventory.filter(item =>
     (item.item_name || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -298,6 +310,9 @@ export default function InventarioSalud({ token }) {
                             </button>
                             <button onClick={() => openEditItem(item)} className="text-[#0b2347] hover:bg-primary-container/20 p-1.5 rounded-full cursor-pointer border-0 bg-transparent" title="Editar insumo">
                               <span className="material-symbols-outlined text-sm">edit</span>
+                            </button>
+                            <button onClick={() => handleDeleteItem(item)} className="text-error hover:bg-error/10 p-1.5 rounded-full cursor-pointer border-0 bg-transparent" title="Eliminar insumo médico">
+                              <span className="material-symbols-outlined text-sm">delete</span>
                             </button>
                           </div>
                         </td>
