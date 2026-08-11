@@ -258,6 +258,7 @@ export default function Logistics({ token }) {
                 >
                   <option value="Desayuno">Desayuno</option>
                   <option value="Almuerzo">Almuerzo</option>
+                  <option value="Merienda">Merienda</option>
                   <option value="Cena">Cena</option>
                 </select>
               </div>
@@ -357,6 +358,7 @@ export default function Logistics({ token }) {
                 >
                   <option value="Desayuno">Desayuno</option>
                   <option value="Almuerzo">Almuerzo</option>
+                  <option value="Merienda">Merienda</option>
                   <option value="Cena">Cena</option>
                 </select>
               </div>
@@ -432,7 +434,6 @@ export default function Logistics({ token }) {
                 <input 
                   type="text" 
                   value={donationItem} 
-                  onChange={(e) => setDeliveryItem(e.target.value) /* Wait: donationItem and donationQty needs setting. Let's fix that below */} 
                   onChange={(e) => setDonationItem(e.target.value)}
                   className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none"
                   placeholder="ej. Pañales desechables"

@@ -5,6 +5,7 @@ export default function InventarioCocina({ token, user }) {
   const { refugioId } = useParams();
 
   const [inventory, setInventory] = useState([]);
+  const [menus, setMenus] = useState([]);
   const [cocinaDeposito, setCocinaDeposito] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -84,12 +85,107 @@ export default function InventarioCocina({ token, user }) {
           setInventory([]);
         }
       }
+
+      // Fetch menus
+      const resMenu = await fetch(`${API_BASE}/refugios/${refugioId}/menus`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (resMenu.ok) {
+        setMenus(await resMenu.json());
+      }
     } catch (err) {
       console.error(err);
       setError('Error al obtener el inventario de cocina.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const normalizeName = (name) => {
+    if (!name) return '';
+    return name
+      .toLowerCase()
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  };
+
+  const normalizeUnit = (u) => {
+    if (!u) return 'Unidades';
+    const clean = u.toLowerCase().trim();
+    if (clean.startsWith('k') || clean === 'kg' || clean === 'kilos' || clean === 'kilo') return 'Kilos';
+    if (clean.startsWith('l') || clean === 'litros' || clean === 'litro') return 'Litros';
+    if (clean.startsWith('p') || clean === 'paquetes' || clean === 'paquete' || clean === 'paq') return 'Paquetes';
+    if (clean.startsWith('u') || clean === 'unidades' || clean === 'unidad' || clean === 'uds' || clean === 'u') return 'Unidades';
+    return u;
+  };
+
+  const parseIngredients = (ingredients) => {
+    if (!ingredients) return [];
+    const reqs = {};
+    const normalizedText = ingredients.replace(/\s+y\s+(?=\d+(?:[.,]\d+)?\s*(?:kg|g|gr|gramos|paquetes|paq|potes?|frascos?|empaques?|packs?|l|lt|litros|ml|unidades|uds|u)\b)/gi, ', ');
+    const parts = normalizedText.split(/[;\n]+|,\s+(?=(?:\d|[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]))/);
+
+    parts.forEach(part => {
+      const trimmed = part.trim();
+      if (!trimmed) return;
+
+      let name = '';
+      let qty = 1;
+      let unit = 'Unidades';
+
+      if (trimmed.includes(':')) {
+        const split = trimmed.split(':');
+        name = split[0].trim();
+        const qtyStr = split.slice(1).join(':').trim();
+        const numMatch = qtyStr.match(/^(\d+(?:[.,]\d+)?)\s*(.*)$/);
+        if (numMatch) {
+          qty = parseFloat(numMatch[1].replace(',', '.'));
+          unit = normalizeUnit(numMatch[2]);
+        }
+      } else {
+        const leadMatch = trimmed.match(/^(\d+(?:[.,]\d+)?)\s*(?:(kg|g|gr|gramos|paquetes|paq|potes?|frascos?|empaques?|packs?|l|lt|litros|ml|unidades|uds|u))?\s*(?:de\s+)?(.*)$/i);
+        const trailMatch = trimmed.match(/^(.*?)\s+(\d+(?:[.,]\d+)?)\s*(kg|g|gr|gramos|paquetes|paq|potes?|frascos?|empaques?|packs?|l|lt|litros|ml|unidades|uds|u)?$/i);
+
+        if (leadMatch) {
+          qty = parseFloat(leadMatch[1].replace(',', '.'));
+          unit = normalizeUnit(leadMatch[2] || 'Unidades');
+          name = leadMatch[3].trim();
+        } else if (trailMatch) {
+          name = trailMatch[1].trim();
+          qty = parseFloat(trailMatch[2].replace(',', '.'));
+          unit = normalizeUnit(trailMatch[3] || 'Unidades');
+        } else {
+          name = trimmed;
+        }
+      }
+
+      if (name) {
+        name = name.replace(/^(de|del|la|el|los|las)\s+/i, '').trim();
+        const key = normalizeName(`${name}_${unit}`);
+        if (!reqs[key]) {
+          reqs[key] = { name, quantity: 0, unit };
+        }
+        reqs[key].quantity += qty;
+      }
+    });
+
+    return Object.values(reqs);
+  };
+
+  const getCommittedToday = (itemName) => {
+    const DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    const todayName = DAYS[(new Date().getDay() + 6) % 7];
+    let total = 0;
+    const todayMenus = menus.filter(m => m.day_of_week === todayName);
+    todayMenus.forEach(m => {
+      const parsed = parseIngredients(m.ingredients);
+      const matched = parsed.find(p => normalizeName(p.name) === normalizeName(itemName));
+      if (matched) {
+        total += matched.quantity;
+      }
+    });
+    return total;
   };
 
   const handleOpenCreate = () => {
@@ -217,6 +313,14 @@ export default function InventarioCocina({ token, user }) {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      {/* Printable header with logos, visible only during printing */}
+      <div className="print-header-logos">
+        <img src="/campamento-logo-transparente.png" alt="Campamento Logo" className="h-10 object-contain" />
+        <h2 className="text-xs font-black text-[#0b2347] uppercase tracking-wider text-center flex-1">
+          Inventario de Cocina
+        </h2>
+        <img src="/logo-saren.png" alt="Saren Logo" className="h-8 object-contain" />
+      </div>
       {/* Header */}
       <header className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -274,6 +378,24 @@ export default function InventarioCocina({ token, user }) {
               <option value="25">25 por página</option>
               <option value="50">50 por página</option>
             </select>
+            <button
+              onClick={() => {
+                window.open(`${API_BASE}/refugios/${refugioId}/inventory/download?type=kitchen&token=${token}`);
+              }}
+              style={{ backgroundColor: '#10b981' }}
+              className="py-1.5 px-3 hover:opacity-90 text-white font-bold rounded-lg flex items-center gap-1.5 cursor-pointer border-0 text-xs shadow-xs"
+            >
+              <span className="material-symbols-outlined text-xs">download</span>
+              Descargar Excel
+            </button>
+            <button
+              onClick={() => window.print()}
+              style={{ backgroundColor: '#0b2347' }}
+              className="py-1.5 px-3 hover:opacity-90 text-white font-bold rounded-lg flex items-center gap-1.5 cursor-pointer border-0 text-xs shadow-xs"
+            >
+              <span className="material-symbols-outlined text-xs">picture_as_pdf</span>
+              Descargar PDF
+            </button>
           </div>
           <span>Total Ítems: <span className="text-[#0b2347] font-black">{inventory.length}</span></span>
           <span>Stock Crítico: <span className="text-error font-black">{inventory.filter(i => parseFloat(i.quantity) <= parseFloat(i.min_threshold)).length}</span></span>
@@ -289,7 +411,9 @@ export default function InventarioCocina({ token, user }) {
               <thead>
                 <tr className="border-b border-outline-variant text-on-surface-variant font-bold">
                   <th className="pb-3 pl-2">Alimento / Insumo</th>
-                  <th className="pb-3 text-center">Stock Actual</th>
+                  <th className="pb-3 text-center">Stock Físico</th>
+                  <th className="pb-3 text-center">Comprometido (Hoy)</th>
+                  <th className="pb-3 text-center">Disponible Real</th>
                   <th className="pb-3 text-center">Unidad</th>
                   <th className="pb-3 text-center">Stock Mínimo</th>
                   <th className="pb-3 text-center">Estado</th>
@@ -300,11 +424,15 @@ export default function InventarioCocina({ token, user }) {
                 {currentKitchenList.map((item) => {
                   const qtyVal = parseFloat(item.quantity) || 0;
                   const minVal = parseFloat(item.min_threshold) || 0;
+                  const committed = getCommittedToday(item.item_name);
+                  const available = qtyVal - committed;
                   const isCritical = qtyVal <= minVal;
                   return (
                     <tr key={item.id} className="border-b border-outline-variant/30 hover:bg-surface-container-low transition-all">
                       <td className="py-4 pl-2 font-bold text-on-surface">{item.item_name}</td>
-                      <td className="py-4 text-center font-bold font-mono text-primary text-sm">{item.quantity}</td>
+                      <td className="py-4 text-center font-bold font-mono text-primary text-sm">{qtyVal}</td>
+                      <td className="py-4 text-center font-bold font-mono text-amber-700 text-sm">{committed > 0 ? committed : '0'}</td>
+                      <td className={`py-4 text-center font-bold font-mono text-sm ${available < 0 ? 'text-error' : 'text-success'}`}>{available}</td>
                       <td className="py-4 text-center font-medium text-on-surface-variant">{item.unit || 'Unidades'}</td>
                       <td className="py-4 text-center font-mono text-on-surface-variant">{item.min_threshold}</td>
                       <td className="py-4 text-center">
@@ -461,7 +589,48 @@ export default function InventarioCocina({ token, user }) {
           </div>
         </div>
       )}
-
+      {/* Stylesheet dynamically injected for premium PDF printing format */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @media print {
+          @page {
+            size: letter portrait;
+            margin: 12mm;
+          }
+          body, html {
+            background: white !important;
+            color: black !important;
+            font-size: 10px !important;
+          }
+          /* Hide sidebar, headers, filters, page controls, button tags */
+          header, aside, nav, footer, button, select, input, .no-print, .print-hidden {
+            display: none !important;
+          }
+          /* Expand main container to full screen */
+          main, .max-w-7xl, .max-w-5xl, .mx-auto, [class*="ml-"] {
+            margin: 0 !important;
+            padding: 0 !important;
+            max-width: 100% !important;
+            width: 100% !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
+          /* Hide parent margins */
+          div[class*="pl-"], div[class*="pr-"], div[class*="ml-"], div[class*="mr-"] {
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+          }
+          table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+          }
+          th, td {
+            font-size: 9px !important;
+            padding: 6px 4px !important;
+          }
+        }
+      `}} />
     </div>
   );
 }

@@ -813,7 +813,7 @@ export default function ConsolidatedReports({ token, scopeRefugioId = null }) {
   };
   const admissionSeries = buildDailySeries(periodResidents, item => item.created_at);
   const mealSeries = buildDailySeries(scopedMeals, item => item.meal_date);
-  const mealsByType = ['Desayuno', 'Almuerzo', 'Cena'].map((label, index) => ({
+  const mealsByType = ['Desayuno', 'Almuerzo', 'Merienda', 'Cena'].map((label, index) => ({
     label,
     value: scopedMeals.filter(item => item.meal_type === label).length,
     color: COLORS[index + 1]

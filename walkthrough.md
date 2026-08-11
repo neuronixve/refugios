@@ -36,6 +36,16 @@ Hemos implementado el sistema completo de **Gestión de Usuarios y Control de Ac
 
 ### 4. Interfaz de Gestión de Usuarios
 *   **[Configuracion.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios/frontend/src/pages/Configuracion.jsx):**
+    *   En **Inventario de Cocina**, se incorporaron dos columnas nuevas: **Comprometido (Hoy)** (suma requerida por los menús del día de hoy) y **Disponible Real** (Stock físico restando lo comprometido para hoy), asegurando que el personal sepa exactamente cuándo pedir insumos a la bodega central.
+
+---
+
+## 7. Corrección en Límite de Entregas Médicas (Conversión de Unidades)
+*   **Problema:** Si el médico indicaba `3 Cajas` de tratamiento y el supervisor entregaba `10 pastillas` (donde 1 caja = 20 pastillas), el validador comparaba la cantidad numérica cruda de la entrega (`10`) contra el límite (`3`), bloqueando erróneamente la operación por exceder el máximo permitido.
+*   **Solución (Backend & Frontend):** 
+    *   Tanto en la validación del servidor como en el control del cliente, la cantidad a entregar en sub-unidades (ej. pastillas) se convierte matemáticamente a la unidad principal (cajas/blisters) usando el factor de empaque (`units_per_package`) antes de realizar la verificación de límite.
+    *   La suma de entregas anteriores (`deliveredTotal` y `alreadyDelivered`) también se calcula convirtiendo proporcionalmente cualquier registro previo hecho en sub-unidades a la unidad base de control.
+    *   Esto permite entregar dosis fraccionadas sin falsos positivos de bloqueo, actualizando el inventario y calculando el "Saldo por entregar" correctamente en fracciones de la unidad principal (ej. `2.5 Cajas` restantes tras dar `10 pastillas`).
     *   Se rediseñó la página usando pestañas premium ("Distribución Física y Camas" y "Gestión de Personal y Cuentas").
     *   Se integró un formulario de creación de personal y una tabla de personal registrado, respetando estrictamente las jerarquías (los supervisores solo ven/crean gerentes; los gerentes solo ven/crean su personal local).
 
@@ -191,8 +201,55 @@ Hemos completado la optimización UX del módulo de salud y la adición de indic
 *   **Historial en la Ficha del Residente:** La base de datos y la API se modificaron (`involved_residents TEXT`) para almacenar esta estructura JSON. En **[`Residents.jsx`](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios/frontend/src/pages/Residents.jsx)** se visualizan las incidencias y denuncias donde el residente estuvo involucrado, destacando su rol registrado. Esto sirve como respaldo legal ante la Fiscalía o cuerpos de seguridad.
 
 ### 5. Corrección de la Pestaña "Consultar Visitas y Apoyos"
-*   Se corrigió un error de referencia al declarar el helper de filtrado reactivo `filteredResidentsForVisits` en **[`ControlAcceso.jsx`](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios/frontend/src/pages/ControlAcceso.jsx)**, restableciendo el correcto funcionamiento de la pestaña de consulta de autorizaciones de visitas y familiares de apoyo en Caracas.
+*   Se corrigió un error de referencia al declarar el helper de filtrado reactivo `filteredResidentsForVisits` en **[`ControlAcceso.jsx`](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios/frontend/src/pages/ControlAcceso.jsx)**, restableciendo el correcto funcionamiento de la pestaña de consulta de autorizaciones de visitas y familiares de apoyo en Caracas.---
 
+## Cambios Recientes (Versión 5.26): Reporte de Salud Optimizado (Alertas de Medicinas y Demografía Detallada)
 
+Hemos optimizado el panel de **Gestión Sanitaria y Demográfica** (`MedicalReport.jsx`) con las siguientes mejoras críticas de negocio:
 
+### 1. Filtrado de Alertas de Suministros Críticos
+*   **Problema:** El panel mostraba alertas de insumos de alimentos u otras categorías generales (como "Mayonesa" o "Harina PAN") en la consola médica.
+*   **Solución:** Se implementó una resolución dinámica de la sede local de salud y se filtró la colección de alertas críticas de inventario. Ahora, el panel médico **solo muestra alertas de ítems que pertenecen al Consultorio / Depósito de Salud** o cuya categoría es estrictamente **'Medicinas'** o **'Medicina'**.
 
+### 2. Demografía Infantil y Adolescentes con Desglose por Género
+*   Se actualizaron los contadores de Lactantes (0-2 años), Prescolar (3-5 años) y Escolares (6-12 años) para calcular y mostrar de manera explícita la cantidad de **Niños (Masculino)** y **Niñas (Femenino)** en cada grupo.
+*   Se agregó la categoría de **Adolescentes (13-17 años)** para evitar vacíos demográficos en el censo.
+*   Se rediseñaron las barras de progreso demográfico con una interfaz de **doble color responsivo** (rosa para femenino, azul para masculino) indicando visualmente la proporción de géneros de cada grupo infantil.
+
+### 3. Tarjeta de Demografía Adulta y Adulto Mayor con Distribución de Sexo
+*   Se añadió un panel completo para la **Demografía de Adultos** en la vista de salud, segmentando a la población activa en tres rangos de edad clave:
+    1.  **Adultos Jóvenes (18-35 años)**
+    2.  **Adultos (36-60 años)**
+    3.  **Adultos Mayores (Tercera Edad, más de 60 años)**
+*   Cada sección muestra el total de integrantes y el desglose numérico exacto de **Femenino** y **Masculino**.
+*   Se renderiza un gráfico de barra continuo con distribución porcentual de sexos para simplificar la lectura epidemiológica a los médicos y supervisores en campo.
+
+---
+
+## Cambios Recientes (Versión 5.27): Acciones Directas en Inventario de Almacén y Exportación PDF en Todos los Inventarios
+
+Hemos integrado funciones avanzadas de edición y exportación directa en todos los módulos de inventario:
+
+### 1. Acciones Directas en la Tabla de Almacén Central
+*   **[Inventory.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios/frontend/src/pages/Inventory.jsx):**
+    *   Anteriormente, las opciones para editar stock o eliminar registros estaban agrupadas exclusivamente dentro de la ventana de detalles.
+    *   Se incorporaron los botones de **Editar** (naranja) y **Eliminar** (rojo) directamente en cada fila de la tabla principal de insumos consolidados.
+    *   **Comportamiento Inteligente:** Si un insumo se encuentra almacenado en una sola ubicación física (depósito), al hacer clic en Editar o Eliminar se ejecuta la acción de forma instantánea sobre dicho registro. Si está distribuido en múltiples ubicaciones, el sistema abre la ventana de detalles de depósitos para permitir al usuario seleccionar cuál depósito específico modificar.
+
+### 2. Exportación a PDF de Todos los Inventarios (Almacén, Cocina y Salud)
+*   **[Inventory.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios/frontend/src/pages/Inventory.jsx), [InventarioCocina.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios/frontend/src/pages/InventarioCocina.jsx) e [InventarioSalud.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios/frontend/src/pages/InventarioSalud.jsx):**
+    *   Se añadió un botón **Descargar PDF** al lado del botón de Excel en las tres pantallas de inventario.
+    *   Se inyectaron hojas de estilo de impresión personalizadas (`@media print`) en cada componente.
+    *   Al imprimir o guardar como PDF a través del navegador, el sistema oculta automáticamente la barra de navegación lateral, el encabezado general, los botones de acción, filtros, cajas de búsqueda y selectores de paginación.
+    *   Se ajustan los márgenes a **12mm** y la tabla se expande a pantalla completa, generando un documento PDF perfectamente estructurado e ideal para imprimir y auditar físicamente en almacenes.
+    *   **Inclusión de Logos en PDF de Impresión:** Se agregaron a la vista de impresión los dos logotipos oficiales: **Logo de Campamento Transitorio SAREN** (izquierda) y el **Logo de SAREN** (derecha) en el encabezado del documento impreso.
+
+### 3. Visibilidad de Botones de Excel y Logos de la Institución
+*   **Corrección de Colores de Fondo:** Los botones de "Descargar Excel" en cocina y salud utilizaban una clase genérica `bg-success` que no estaba definida en la configuración de Tailwind, lo que causaba que el fondo fuera transparente (blanco) y el texto blanco fuera invisible. Se reemplazaron por colores hex directos e inline (`style={{ backgroundColor: '#10b981' }}` para Excel y `style={{ backgroundColor: '#0b2347' }}` para PDF) garantizando su total visibilidad en todos los navegadores y bajo cualquier estado de caché de CSS.
+*   **Logos en Hojas Excel Generadas:** En **[server.js](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios/backend/server.js)**, se implementó el uso de la API `addImage` de `exceljs` para insertar de forma dinámica el **Logo de Campamento Transitorio** (esquina izquierda superior de A1) y el **Logo Oficial de SAREN** (esquina derecha superior de F1) dentro del encabezado de la hoja de cálculo generada.
+
+### 4. Selección de Ingredientes no Registrados y Unidades de Cocina
+*   **[LogisticsMenus.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios/frontend/src/pages/LogisticsMenus.jsx):**
+    *   **Ingredientes Personalizados:** Se integró la opción "+ Otro alimento (no registrado)..." en el selector de insumos dentro del modal de programación de menús. Al hacer clic, la fila se transforma dinámicamente mostrando un campo de texto para que el usuario escriba el nombre de cualquier alimento externo.
+    *   **Selector de Unidades Comunes:** Para estos ingredientes no registrados, se despliega un selector con las unidades de medida más comunes en la cocina: **Kilos**, **Litros**, **Paquetes**, **Unidades**, **Gramos**, **Latas**, **Bolsas** y **Cajas**.
+    *   **Persistencia y Carga:** Las recetas se compilan y se guardan como cadenas estructuradas. Al volver a abrir el modal de edición, el sistema analiza los ingredientes guardados y marca automáticamente como "Personalizados" aquellos cuyos nombres no existan en el stock local, permitiendo editarlos sin romper el flujo de trabajo.

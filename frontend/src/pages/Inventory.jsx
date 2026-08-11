@@ -286,6 +286,25 @@ export default function Inventory({ token, tab }) {
     setShowItemModal(true);
   };
 
+  const handleDeleteItem = async (id) => {
+    try {
+      const res = await fetch(`${API_BASE}/refugios/${refugioId}/inventory/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setShowDetailModal(false);
+        fetchInventory();
+      } else {
+        const errData = await res.json();
+        alert(errData.error || 'Error al eliminar el insumo.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error de red al conectar con el servidor.');
+    }
+  };
+
   // Find active resident detail
   const selectedResident = residents.find(r => r.id.toString() === residentId.toString());
 
@@ -367,6 +386,14 @@ export default function Inventory({ token, tab }) {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      {/* Printable header with logos, visible only during printing */}
+      <div className="print-header-logos">
+        <img src="/campamento-logo-transparente.png" alt="Campamento Logo" className="h-10 object-contain" />
+        <h2 className="text-xs font-black text-[#0b2347] uppercase tracking-wider text-center flex-1">
+          Inventario General de Almacén
+        </h2>
+        <img src="/logo-saren.png" alt="Saren Logo" className="h-8 object-contain" />
+      </div>
       {/* Header */}
       <header className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -461,6 +488,24 @@ export default function Inventory({ token, tab }) {
                 <option value="25">25 por página</option>
                 <option value="50">50 por página</option>
               </select>
+              <button
+                onClick={() => {
+                  window.open(`${API_BASE}/refugios/${refugioId}/inventory/download?type=general&token=${token}`);
+                }}
+                style={{ backgroundColor: '#10b981' }}
+                className="py-2 px-3 hover:opacity-90 text-white font-bold rounded-lg flex items-center gap-1.5 cursor-pointer border-0 shadow-xs"
+              >
+                <span className="material-symbols-outlined text-sm">download</span>
+                Descargar Excel
+              </button>
+              <button
+                onClick={() => window.print()}
+                style={{ backgroundColor: '#0b2347' }}
+                className="py-2 px-3 hover:opacity-90 text-white font-bold rounded-lg flex items-center gap-1.5 cursor-pointer border-0 shadow-xs"
+              >
+                <span className="material-symbols-outlined text-sm">picture_as_pdf</span>
+                Descargar PDF
+              </button>
             </div>
           </div>
 
@@ -506,10 +551,45 @@ export default function Inventory({ token, tab }) {
                                   setSelectedConsolidatedItem(item);
                                   setShowDetailModal(true);
                                 }}
-                                className="px-2.5 py-1 bg-primary text-white rounded font-bold text-[10px] cursor-pointer hover:bg-primary/90 flex items-center gap-1 shadow-xs border-0"
+                                style={{ backgroundColor: '#0b2347' }}
+                                className="px-2.5 py-1 text-white rounded font-bold text-[10px] cursor-pointer hover:opacity-95 flex items-center gap-1 shadow-xs border-0"
                               >
                                 <span className="material-symbols-outlined text-[10px]">visibility</span>
                                 Ver Detalle
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  const matched = inventory.filter(dbItem => dbItem.item_name === item.item_name);
+                                  if (matched.length === 1) {
+                                    handleEditItem(matched[0]);
+                                  } else {
+                                    setSelectedConsolidatedItem(item);
+                                    setShowDetailModal(true);
+                                  }
+                                }}
+                                style={{ backgroundColor: '#f59e0b' }}
+                                className="px-2 py-1 text-white rounded font-bold text-[10px] cursor-pointer hover:opacity-95 flex items-center gap-1 shadow-xs border-0"
+                              >
+                                <span className="material-symbols-outlined text-[10px]">edit</span>
+                                Editar
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  const matched = inventory.filter(dbItem => dbItem.item_name === item.item_name);
+                                  if (matched.length === 1) {
+                                    if (window.confirm('¿Está seguro de eliminar este insumo de forma permanente?')) {
+                                      handleDeleteItem(matched[0].id);
+                                    }
+                                  } else {
+                                    setSelectedConsolidatedItem(item);
+                                    setShowDetailModal(true);
+                                  }
+                                }}
+                                style={{ backgroundColor: '#ef4444' }}
+                                className="px-2 py-1 text-white rounded font-bold text-[10px] cursor-pointer hover:opacity-95 flex items-center gap-1 shadow-xs border-0"
+                              >
+                                <span className="material-symbols-outlined text-[10px]">delete</span>
+                                Eliminar
                               </button>
                             </div>
                           </td>
@@ -1115,7 +1195,7 @@ export default function Inventory({ token, tab }) {
                     <tr key={dbItem.id} className="border-b border-outline-variant/30 hover:bg-surface-container-low transition-colors">
                       <td className="py-2.5 px-4 font-bold text-on-surface">{dbItem.deposito_name || 'Bodega Central'}</td>
                       <td className="py-2.5 px-4 text-center font-bold font-mono text-[#0b2347] text-sm">{dbItem.quantity} {dbItem.unit}</td>
-                      <td className="py-2.5 px-4 text-right">
+                      <td className="py-2.5 px-4 text-right flex gap-2 justify-end">
                         <button 
                           onClick={() => {
                             setShowDetailModal(false);
@@ -1124,6 +1204,16 @@ export default function Inventory({ token, tab }) {
                           className="px-2 py-1 bg-primary/10 hover:bg-primary/20 text-primary font-bold rounded text-[10px] cursor-pointer border-0"
                         >
                           Editar Stock
+                        </button>
+                        <button 
+                          onClick={() => {
+                            if (window.confirm('¿Está seguro de eliminar este insumo de forma permanente?')) {
+                              handleDeleteItem(dbItem.id);
+                            }
+                          }}
+                          className="px-2 py-1 bg-error/10 hover:bg-error/20 text-error font-bold rounded text-[10px] cursor-pointer border-0"
+                        >
+                          Eliminar
                         </button>
                       </td>
                     </tr>
@@ -1143,6 +1233,48 @@ export default function Inventory({ token, tab }) {
           </div>
         </div>
       )}
+      {/* Stylesheet dynamically injected for premium PDF printing format */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @media print {
+          @page {
+            size: letter portrait;
+            margin: 12mm;
+          }
+          body, html {
+            background: white !important;
+            color: black !important;
+            font-size: 10px !important;
+          }
+          /* Hide sidebar, headers, filters, page controls, button tags */
+          header, aside, nav, footer, button, select, input, .no-print, .print-hidden {
+            display: none !important;
+          }
+          /* Expand main container to full screen */
+          main, .max-w-7xl, .max-w-5xl, .mx-auto, [class*="ml-"] {
+            margin: 0 !important;
+            padding: 0 !important;
+            max-width: 100% !important;
+            width: 100% !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
+          /* Hide parent margins */
+          div[class*="pl-"], div[class*="pr-"], div[class*="ml-"], div[class*="mr-"] {
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+          }
+          table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+          }
+          th, td {
+            font-size: 9px !important;
+            padding: 6px 4px !important;
+          }
+        }
+      `}} />
     </div>
   );
 }

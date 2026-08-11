@@ -8,6 +8,7 @@ export default function MedicalReport({ token }) {
 
   const [residents, setResidents] = useState([]);
   const [inventory, setInventory] = useState([]);
+  const [healthDepositoId, setHealthDepositoId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [showEpidemiologicalModal, setShowEpidemiologicalModal] = useState(false);
@@ -24,6 +25,16 @@ export default function MedicalReport({ token }) {
   const fetchData = async () => {
     setLoading(true);
     try {
+      // Find Health depósito
+      const resDep = await fetch(`${API_BASE}/refugios/${refugioId}/depositos`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (resDep.ok) {
+        const depList = await resDep.json();
+        const found = depList.find(d => d.name.toLowerCase().includes('medico') || d.name.toLowerCase().includes('salud') || d.name.toLowerCase().includes('consultorio'));
+        if (found) setHealthDepositoId(found.id);
+      }
+
       const resRes = await fetch(`${API_BASE}/damnificados?refugio_id=${refugioId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -51,9 +62,14 @@ export default function MedicalReport({ token }) {
     let cronicos = 0;
     let tratamientos = 0;
 
-    let lactantes = 0; // 0-2
-    let prescolar = 0; // 3-5
-    let escolar = 0;   // 6-12
+    let lactantesF = 0, lactantesM = 0;
+    let prescolarF = 0, prescolarM = 0;
+    let escolarF = 0, escolarM = 0;
+    let adolescentesF = 0, adolescentesM = 0;
+
+    let adultosJovenesF = 0, adultosJovenesM = 0;
+    let adultosF = 0, adultosM = 0;
+    let adultosMayoresF = 0, adultosMayoresM = 0;
 
     let patList = {
       hipertension: 0,
@@ -84,9 +100,22 @@ export default function MedicalReport({ token }) {
       }
 
       if (age !== null) {
-        if (age <= 2) lactantes++;
-        else if (age <= 5) prescolar++;
-        else if (age <= 12) escolar++;
+        const isF = r.gender === 'Femenino';
+        if (age <= 2) {
+          if (isF) lactantesF++; else lactantesM++;
+        } else if (age <= 5) {
+          if (isF) prescolarF++; else prescolarM++;
+        } else if (age <= 12) {
+          if (isF) escolarF++; else escolarM++;
+        } else if (age <= 17) {
+          if (isF) adolescentesF++; else adolescentesM++;
+        } else if (age <= 35) {
+          if (isF) adultosJovenesF++; else adultosJovenesM++;
+        } else if (age <= 60) {
+          if (isF) adultosF++; else adultosM++;
+        } else {
+          if (isF) adultosMayoresF++; else adultosMayoresM++;
+        }
       }
 
       // Metadata check
@@ -129,7 +158,20 @@ export default function MedicalReport({ token }) {
       }
     });
 
-    return { embarazadas, cronicos, tratamientos, lactantes, prescolar, escolar, patList, patSex };
+    return {
+      embarazadas,
+      cronicos,
+      tratamientos,
+      lactantesF, lactantesM,
+      prescolarF, prescolarM,
+      escolarF, escolarM,
+      adolescentesF, adolescentesM,
+      adultosJovenesF, adultosJovenesM,
+      adultosF, adultosM,
+      adultosMayoresF, adultosMayoresM,
+      patList,
+      patSex
+    };
   };
 
   const data = getDemographicsAndPathologies();
@@ -149,7 +191,8 @@ export default function MedicalReport({ token }) {
   };
 
   const criticalInventory = inventory.filter(item =>
-    Number(item.quantity) <= Number(item.min_threshold)
+    Number(item.quantity) <= Number(item.min_threshold) &&
+    ((healthDepositoId !== null && item.deposito_id === healthDepositoId) || (item.category && (item.category.toLowerCase() === 'medicinas' || item.category.toLowerCase() === 'medicina')))
   );
 
   const handleRequestWarehouse = async (itemName, qty) => {
@@ -309,10 +352,13 @@ export default function MedicalReport({ token }) {
                       0-2 años (Lactantes)
                       <span className="px-1.5 py-0.5 rounded font-black uppercase text-[7px] bg-primary/10 text-primary">Pañales/Fórmula</span>
                     </span>
-                    <span className="text-on-surface-variant font-mono">{data.lactantes} niños</span>
+                    <span className="text-on-surface-variant font-mono">
+                      {data.lactantesF + data.lactantesM} ({data.lactantesM} niños, {data.lactantesF} niñas)
+                    </span>
                   </div>
-                  <div className="w-full bg-surface-container rounded-full h-2">
-                    <div className="bg-primary h-2 rounded-full" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.lactantes / totalCenso) * 100)) : 0}%` }}></div>
+                  <div className="w-full bg-surface-container rounded-full h-2 flex overflow-hidden">
+                    <div className="bg-pink-500" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.lactantesF / totalCenso) * 100)) : 0}%` }}></div>
+                    <div className="bg-blue-500" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.lactantesM / totalCenso) * 100)) : 0}%` }}></div>
                   </div>
                 </div>
 
@@ -320,10 +366,13 @@ export default function MedicalReport({ token }) {
                 <div className="flex flex-col gap-1.5">
                   <div className="flex justify-between items-center text-xs font-bold">
                     <span className="text-on-surface">3-5 años (Prescolar)</span>
-                    <span className="text-on-surface-variant font-mono">{data.prescolar} niños</span>
+                    <span className="text-on-surface-variant font-mono">
+                      {data.prescolarF + data.prescolarM} ({data.prescolarM} niños, {data.prescolarF} niñas)
+                    </span>
                   </div>
-                  <div className="w-full bg-surface-container rounded-full h-2">
-                    <div className="bg-primary h-2 rounded-full" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.prescolar / totalCenso) * 100)) : 0}%` }}></div>
+                  <div className="w-full bg-surface-container rounded-full h-2 flex overflow-hidden">
+                    <div className="bg-pink-500" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.prescolarF / totalCenso) * 100)) : 0}%` }}></div>
+                    <div className="bg-blue-500" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.prescolarM / totalCenso) * 100)) : 0}%` }}></div>
                   </div>
                 </div>
 
@@ -331,10 +380,27 @@ export default function MedicalReport({ token }) {
                 <div className="flex flex-col gap-1.5">
                   <div className="flex justify-between items-center text-xs font-bold">
                     <span className="text-on-surface">6-12 años (Escolares)</span>
-                    <span className="text-on-surface-variant font-mono">{data.escolar} niños</span>
+                    <span className="text-on-surface-variant font-mono">
+                      {data.escolarF + data.escolarM} ({data.escolarM} niños, {data.escolarF} niñas)
+                    </span>
                   </div>
-                  <div className="w-full bg-surface-container rounded-full h-2">
-                    <div className="bg-primary h-2 rounded-full" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.escolar / totalCenso) * 100)) : 0}%` }}></div>
+                  <div className="w-full bg-surface-container rounded-full h-2 flex overflow-hidden">
+                    <div className="bg-pink-500" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.escolarF / totalCenso) * 100)) : 0}%` }}></div>
+                    <div className="bg-blue-500" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.escolarM / totalCenso) * 100)) : 0}%` }}></div>
+                  </div>
+                </div>
+
+                {/* 13-17 */}
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex justify-between items-center text-xs font-bold">
+                    <span className="text-on-surface">13-17 años (Adolescentes)</span>
+                    <span className="text-on-surface-variant font-mono">
+                      {data.adolescentesF + data.adolescentesM} ({data.adolescentesM} niños, {data.adolescentesF} niñas)
+                    </span>
+                  </div>
+                  <div className="w-full bg-surface-container rounded-full h-2 flex overflow-hidden">
+                    <div className="bg-pink-500" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.adolescentesF / totalCenso) * 100)) : 0}%` }}></div>
+                    <div className="bg-blue-500" style={{ width: `${totalCenso > 0 ? Math.min(100, Math.round((data.adolescentesM / totalCenso) * 100)) : 0}%` }}></div>
                   </div>
                 </div>
 
@@ -343,7 +409,7 @@ export default function MedicalReport({ token }) {
               {/* Info box */}
               <div className="mt-4 p-4 bg-surface-container-low border border-outline-variant/40 rounded-2xl text-[10px] text-on-surface-variant leading-relaxed font-medium">
                 <span className="font-black text-[#0b2347] uppercase block mb-1">Nota Logística</span>
-                Censo actual: {data.lactantes} residentes de 0 a 2 años. Estimación operativa semanal: {data.lactantes * 42} pañales (6 diarios por residente). La fórmula debe calcularse individualmente según indicación médica.
+                Censo actual: {data.lactantesF + data.lactantesM} lactantes (0 a 2 años). Estimación operativa semanal: {(data.lactantesF + data.lactantesM) * 42} pañales (6 diarios por residente).
               </div>
             </div>
 
@@ -419,6 +485,66 @@ export default function MedicalReport({ token }) {
               </button>
             </div>
 
+          </div>
+
+          {/* Adult Demographics Row */}
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs flex flex-col gap-6">
+            <h3 className="text-xs font-black text-on-surface uppercase tracking-wider border-b border-outline-variant/30 pb-3 flex items-center justify-between">
+              <span>Demografía de Adultos (Salud)</span>
+              <span className="material-symbols-outlined text-sm text-on-surface-variant/40">groups</span>
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              
+              {/* Adultos Jóvenes */}
+              <div className="bg-surface-container-low border border-outline-variant/40 rounded-2xl p-5 flex flex-col gap-3">
+                <span className="text-[10px] font-black text-on-surface-variant uppercase tracking-wider">Adultos Jóvenes (18-35 años)</span>
+                <span className="text-xl font-black text-[#0b2347] font-mono leading-none">
+                  {data.adultosJovenesF + data.adultosJovenesM} <span className="text-xs text-on-surface-variant font-medium">totales</span>
+                </span>
+                <div className="flex justify-between items-center text-[10px] font-bold text-on-surface-variant">
+                  <span>Femenino: <span className="text-pink-600 font-extrabold">{data.adultosJovenesF}</span></span>
+                  <span>Masculino: <span className="text-blue-600 font-extrabold">{data.adultosJovenesM}</span></span>
+                </div>
+                <div className="w-full bg-surface-container rounded-full h-2 flex overflow-hidden">
+                  <div className="bg-pink-500" style={{ width: `${data.adultosJovenesF + data.adultosJovenesM > 0 ? (data.adultosJovenesF / (data.adultosJovenesF + data.adultosJovenesM)) * 100 : 0}%` }}></div>
+                  <div className="bg-blue-500" style={{ width: `${data.adultosJovenesF + data.adultosJovenesM > 0 ? (data.adultosJovenesM / (data.adultosJovenesF + data.adultosJovenesM)) * 100 : 0}%` }}></div>
+                </div>
+              </div>
+
+              {/* Adultos */}
+              <div className="bg-surface-container-low border border-outline-variant/40 rounded-2xl p-5 flex flex-col gap-3">
+                <span className="text-[10px] font-black text-on-surface-variant uppercase tracking-wider">Adultos (36-60 años)</span>
+                <span className="text-xl font-black text-[#0b2347] font-mono leading-none">
+                  {data.adultosF + data.adultosM} <span className="text-xs text-on-surface-variant font-medium">totales</span>
+                </span>
+                <div className="flex justify-between items-center text-[10px] font-bold text-on-surface-variant">
+                  <span>Femenino: <span className="text-pink-600 font-extrabold">{data.adultosF}</span></span>
+                  <span>Masculino: <span className="text-blue-600 font-extrabold">{data.adultosM}</span></span>
+                </div>
+                <div className="w-full bg-surface-container rounded-full h-2 flex overflow-hidden">
+                  <div className="bg-pink-500" style={{ width: `${data.adultosF + data.adultosM > 0 ? (data.adultosF / (data.adultosF + data.adultosM)) * 100 : 0}%` }}></div>
+                  <div className="bg-blue-500" style={{ width: `${data.adultosM + data.adultosF > 0 ? (data.adultosM / (data.adultosF + data.adultosM)) * 100 : 0}%` }}></div>
+                </div>
+              </div>
+
+              {/* Adultos Mayores */}
+              <div className="bg-surface-container-low border border-outline-variant/40 rounded-2xl p-5 flex flex-col gap-3">
+                <span className="text-[10px] font-black text-on-surface-variant uppercase tracking-wider">Adultos Mayores (más de 60 años)</span>
+                <span className="text-xl font-black text-[#0b2347] font-mono leading-none">
+                  {data.adultosMayoresF + data.adultosMayoresM} <span className="text-xs text-on-surface-variant font-medium">totales</span>
+                </span>
+                <div className="flex justify-between items-center text-[10px] font-bold text-on-surface-variant">
+                  <span>Femenino: <span className="text-pink-600 font-extrabold">{data.adultosMayoresF}</span></span>
+                  <span>Masculino: <span className="text-blue-600 font-extrabold">{data.adultosMayoresM}</span></span>
+                </div>
+                <div className="w-full bg-surface-container rounded-full h-2 flex overflow-hidden">
+                  <div className="bg-pink-500" style={{ width: `${data.adultosMayoresF + data.adultosMayoresM > 0 ? (data.adultosMayoresF / (data.adultosMayoresF + data.adultosMayoresM)) * 100 : 0}%` }}></div>
+                  <div className="bg-blue-500" style={{ width: `${data.adultosMayoresM + data.adultosMayoresF > 0 ? (data.adultosMayoresM / (data.adultosMayoresF + data.adultosMayoresM)) * 100 : 0}%` }}></div>
+                </div>
+              </div>
+
+            </div>
           </div>
 
         </div>

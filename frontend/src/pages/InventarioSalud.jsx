@@ -24,6 +24,8 @@ export default function InventarioSalud({ token }) {
   const [quantity, setQuantity] = useState(0);
   const [minThreshold, setMinThreshold] = useState(5);
   const [unit, setUnit] = useState('Unidades');
+  const [subUnit, setSubUnit] = useState('');
+  const [unitsPerPackage, setUnitsPerPackage] = useState(1);
   const [requestDetails, setRequestDetails] = useState('');
 
   const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
@@ -73,6 +75,8 @@ export default function InventarioSalud({ token }) {
     setQuantity(0);
     setMinThreshold(5);
     setUnit('Unidades');
+    setSubUnit('');
+    setUnitsPerPackage(1);
     setRequestDetails('');
     setEditingItemId(null);
     setIsEditing(false);
@@ -90,6 +94,8 @@ export default function InventarioSalud({ token }) {
     setQuantity(item.quantity || 0);
     setMinThreshold(item.min_threshold || 5);
     setUnit(item.unit || 'Unidades');
+    setSubUnit(item.sub_unit || '');
+    setUnitsPerPackage(item.units_per_package || 1);
     setShowItemModal(true);
   };
 
@@ -127,6 +133,8 @@ export default function InventarioSalud({ token }) {
           quantity: qty,
           min_threshold: min,
           unit,
+          units_per_package: parseInt(unitsPerPackage) || 1,
+          sub_unit: subUnit || null,
           status: qty === 0 ? 'Sin Stock' : qty <= min ? 'Stock Crítico' : 'Stock Suficiente'
         })
       });
@@ -208,6 +216,14 @@ export default function InventarioSalud({ token }) {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      {/* Printable header with logos, visible only during printing */}
+      <div className="print-header-logos">
+        <img src="/campamento-logo-transparente.png" alt="Campamento Logo" className="h-10 object-contain" />
+        <h2 className="text-xs font-black text-[#0b2347] uppercase tracking-wider text-center flex-1">
+          Inventario de Salud
+        </h2>
+        <img src="/logo-saren.png" alt="Saren Logo" className="h-8 object-contain" />
+      </div>
       <header className="mb-8 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
         <div>
           <h2 className="text-2xl font-extrabold text-[#0b2347] uppercase leading-none">Inventario de Salud</h2>
@@ -262,9 +278,29 @@ export default function InventarioSalud({ token }) {
             className="w-full bg-surface-container border border-outline-variant rounded-lg pl-9 pr-4 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
           />
         </div>
-        <span className="text-xs font-bold text-on-surface-variant">
-          Depósito local: <span className="text-[#0b2347] font-black">{healthDeposito?.name || 'Servicio Médico'}</span>
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-bold text-on-surface-variant">
+            Depósito local: <span className="text-[#0b2347] font-black">{healthDeposito?.name || 'Servicio Médico'}</span>
+          </span>
+          <button
+            onClick={() => {
+              window.open(`${API_BASE}/refugios/${refugioId}/inventory/download?type=health&token=${token}`);
+            }}
+            style={{ backgroundColor: '#10b981' }}
+            className="py-1.5 px-3 hover:opacity-90 text-white font-bold rounded-lg flex items-center gap-1 cursor-pointer border-0 text-xs shadow-xs"
+          >
+            <span className="material-symbols-outlined text-sm">download</span>
+            Descargar Excel
+          </button>
+          <button
+            onClick={() => window.print()}
+            style={{ backgroundColor: '#0b2347' }}
+            className="py-1.5 px-3 hover:opacity-90 text-white font-bold rounded-lg flex items-center gap-1.5 cursor-pointer border-0 text-xs shadow-xs"
+          >
+            <span className="material-symbols-outlined text-xs">picture_as_pdf</span>
+            Descargar PDF
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -292,7 +328,25 @@ export default function InventarioSalud({ token }) {
                     return (
                       <tr key={item.id} className="border-b border-outline-variant/30 hover:bg-surface-container-low transition-all">
                         <td className="py-4 pl-2 font-bold text-on-surface">{item.item_name}</td>
-                        <td className="py-4 text-center font-bold font-mono text-primary text-sm">{item.quantity}</td>
+                        <td className="py-4 text-center font-mono">
+                          <span className="font-bold text-primary text-sm block">{parseFloat(item.quantity)}</span>
+                          {item.units_per_package > 1 && item.sub_unit && (
+                            <span className="text-[9px] font-bold text-on-surface-variant block mt-0.5">
+                              {(() => {
+                                const whole = Math.floor(qty);
+                                const fraction = qty - whole;
+                                const subQty = Math.round(fraction * item.units_per_package);
+                                if (whole > 0 && subQty > 0) {
+                                  return `${whole} ${item.unit} y ${subQty} ${item.sub_unit}`;
+                                } else if (whole > 0) {
+                                  return `${whole} ${item.unit}`;
+                                } else {
+                                  return `${subQty} ${item.sub_unit}`;
+                                }
+                              })()}
+                            </span>
+                          )}
+                        </td>
                         <td className="py-4 text-center font-medium text-on-surface-variant">{item.unit || 'Unidades'}</td>
                         <td className="py-4 text-center font-mono text-on-surface-variant">{item.min_threshold}</td>
                         <td className="py-4 text-center">
@@ -372,6 +426,10 @@ export default function InventarioSalud({ token }) {
           setMinThreshold={setMinThreshold}
           unit={unit}
           setUnit={setUnit}
+          subUnit={subUnit}
+          setSubUnit={setSubUnit}
+          unitsPerPackage={unitsPerPackage}
+          setUnitsPerPackage={setUnitsPerPackage}
           saving={saving}
           onClose={() => setShowItemModal(false)}
           onSubmit={handleSaveItem}
@@ -393,11 +451,53 @@ export default function InventarioSalud({ token }) {
           onSubmit={handleRequestWarehouse}
         />
       )}
+      {/* Stylesheet dynamically injected for premium PDF printing format */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @media print {
+          @page {
+            size: letter portrait;
+            margin: 12mm;
+          }
+          body, html {
+            background: white !important;
+            color: black !important;
+            font-size: 10px !important;
+          }
+          /* Hide sidebar, headers, filters, page controls, button tags */
+          header, aside, nav, footer, button, select, input, .no-print, .print-hidden {
+            display: none !important;
+          }
+          /* Expand main container to full screen */
+          main, .max-w-7xl, .max-w-5xl, .mx-auto, [class*="ml-"] {
+            margin: 0 !important;
+            padding: 0 !important;
+            max-width: 100% !important;
+            width: 100% !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
+          /* Hide parent margins */
+          div[class*="pl-"], div[class*="pr-"], div[class*="ml-"], div[class*="mr-"] {
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+          }
+          table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+          }
+          th, td {
+            font-size: 9px !important;
+            padding: 6px 4px !important;
+          }
+        }
+      `}} />
     </div>
   );
 }
 
-function HealthItemModal({ title, itemName, setItemName, quantity, setQuantity, minThreshold, setMinThreshold, unit, setUnit, saving, onClose, onSubmit }) {
+function HealthItemModal({ title, itemName, setItemName, quantity, setQuantity, minThreshold, setMinThreshold, unit, setUnit, subUnit, setSubUnit, unitsPerPackage, setUnitsPerPackage, saving, onClose, onSubmit }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl w-full max-w-md p-6 shadow-2xl flex flex-col gap-4">
@@ -409,6 +509,34 @@ function HealthItemModal({ title, itemName, setItemName, quantity, setQuantity, 
             <UnitSelect unit={unit} setUnit={setUnit} />
           </div>
           <NumberField label="Alerta Mínima de Stock" value={minThreshold} onChange={setMinThreshold} />
+
+          <div className="border-t border-outline-variant/30 pt-3 mt-1 flex flex-col gap-3">
+            <span className="text-[10px] font-black text-on-surface-variant uppercase tracking-wider block">Configuración de Sub-unidades (Opcional)</span>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-[9px] font-black text-on-surface-variant uppercase block mb-1">Nombre Sub-unidad</label>
+                <input
+                  type="text"
+                  value={subUnit}
+                  onChange={(e) => setSubUnit(e.target.value)}
+                  placeholder="ej. Pastillas, Ampollas"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-on-surface-variant uppercase block mb-1">Unidades por empaque</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={unitsPerPackage}
+                  onChange={(e) => setUnitsPerPackage(parseInt(e.target.value) || 1)}
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-medium text-center font-bold"
+                />
+              </div>
+            </div>
+            <p className="text-[8px] text-on-surface-variant italic">Configura esto si deseas entregar fracciones del insumo (ej: 1 blister = 10 pastillas).</p>
+          </div>
+
           <ModalActions saving={saving} onClose={onClose} submitLabel="Guardar Inventario" />
         </form>
       </div>

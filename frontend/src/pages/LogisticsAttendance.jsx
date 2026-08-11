@@ -4,7 +4,8 @@ import { Html5QrcodeScanner } from 'html5-qrcode';
 
 const MEAL_WINDOWS = [
   { mealType: 'Desayuno', label: '06:00 AM - 11:00 AM', start: 6 * 60, end: 11 * 60 },
-  { mealType: 'Almuerzo', label: '11:30 AM - 04:30 PM', start: 11 * 60 + 30, end: 16 * 60 + 30 },
+  { mealType: 'Almuerzo', label: '11:30 AM - 03:00 PM', start: 11 * 60 + 30, end: 15 * 60 },
+  { mealType: 'Merienda', label: '03:00 PM - 04:00 PM', start: 15 * 60, end: 16 * 60 },
   { mealType: 'Cena', label: '05:30 PM - 10:00 PM', start: 17 * 60 + 30, end: 22 * 60 }
 ];
 
@@ -237,7 +238,7 @@ export default function LogisticsAttendance({ token }) {
   const registerAttendance = async (docId, personId = null, personType = 'resident') => {
     if (!currentMealWindow) {
       playAlertSound('error');
-      setError('Fuera del horario de servicio. Desayuno 06:00-11:00, Almuerzo 11:30-16:30, Cena 17:30-22:00.');
+      setError('Fuera del horario de servicio. Desayuno 06:00-11:00, Almuerzo 11:30-15:00, Merienda 15:00-16:00, Cena 17:30-22:00.');
       setScanning(false);
       return;
     }

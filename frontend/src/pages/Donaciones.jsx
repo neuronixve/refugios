@@ -90,6 +90,14 @@ export default function Donaciones({ token }) {
   const handleUpdateItem = (index, field, value) => {
     const updated = [...items];
     updated[index][field] = value;
+    if (field === 'category') {
+      if (value === 'Alimentos') updated[index].unit = 'Kilos';
+      else if (value === 'Medicinas') updated[index].unit = 'Blisters';
+      else if (value === 'Higiene') updated[index].unit = 'Unidades';
+      else if (value === 'Camas/Colchones') updated[index].unit = 'Unidades';
+      else if (value === 'Ropa') updated[index].unit = 'Unidades';
+      else updated[index].unit = 'Unidades';
+    }
     setItems(updated);
   };
 
@@ -159,6 +167,62 @@ export default function Donaciones({ token }) {
   // Stats calculators
   const totalQuantity = items.reduce((acc, curr) => acc + (parseInt(curr.quantity) || 0), 0);
   const totalCategories = [...new Set(items.map(item => item.category))].length;
+
+  const getUnitOptions = (category) => {
+    switch (category) {
+      case 'Alimentos':
+        return [
+          { value: 'Kilos', label: 'Kilos' },
+          { value: 'Litros', label: 'Litros' },
+          { value: 'Sacos', label: 'Sacos' },
+          { value: 'Bolsas', label: 'Bolsas' },
+          { value: 'Cajas', label: 'Cajas' },
+          { value: 'Latas', label: 'Latas' },
+          { value: 'Unidades', label: 'Unidades' },
+          { value: 'Packs', label: 'Packs' }
+        ];
+      case 'Medicinas':
+        return [
+          { value: 'Cajas', label: 'Cajas' },
+          { value: 'Blisters', label: 'Blisters' },
+          { value: 'Frascos', label: 'Frascos' },
+          { value: 'Viales', label: 'Viales' },
+          { value: 'Ampollas', label: 'Ampollas' },
+          { value: 'Tabletas', label: 'Tabletas' },
+          { value: 'Pomos', label: 'Pomos' },
+          { value: 'Unidades', label: 'Unidades' }
+        ];
+      case 'Higiene':
+        return [
+          { value: 'Unidades', label: 'Unidades' },
+          { value: 'Paquetes', label: 'Paquetes' },
+          { value: 'Cajas', label: 'Cajas' },
+          { value: 'Litros', label: 'Litros' },
+          { value: 'Galones', label: 'Galones' },
+          { value: 'Packs', label: 'Packs' }
+        ];
+      case 'Camas/Colchones':
+        return [
+          { value: 'Unidades', label: 'Unidades' },
+          { value: 'Packs', label: 'Packs' }
+        ];
+      case 'Ropa':
+        return [
+          { value: 'Unidades', label: 'Unidades' },
+          { value: 'Paquetes', label: 'Paquetes' },
+          { value: 'Pares', label: 'Pares' },
+          { value: 'Cajas', label: 'Cajas' }
+        ];
+      default:
+        return [
+          { value: 'Unidades', label: 'Unidades' },
+          { value: 'Kilos', label: 'Kilos' },
+          { value: 'Litros', label: 'Litros' },
+          { value: 'Cajas', label: 'Cajas' },
+          { value: 'Paquetes', label: 'Paquetes' }
+        ];
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -331,10 +395,9 @@ export default function Donaciones({ token }) {
                           onChange={(e) => handleUpdateItem(index, 'unit', e.target.value)}
                           className="bg-surface-container-lowest border border-outline-variant rounded-xl px-3 py-2 text-xs focus:outline-none"
                         >
-                          <option value="unidades">Unidades</option>
-                          <option value="Cajas">Cajas</option>
-                          <option value="Kilos">Kilos</option>
-                          <option value="Litros">Litros</option>
+                          {getUnitOptions(item.category).map(opt => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                          ))}
                         </select>
                       </div>
                       

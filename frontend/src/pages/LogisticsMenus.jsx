@@ -18,6 +18,7 @@ export default function LogisticsMenus({ token }) {
   const [editMeal, setEditMeal] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editIngredients, setEditIngredients] = useState('');
+  const [recipeItems, setRecipeItems] = useState([]);
   const [saving, setSaving] = useState(false);
 
   // Manual request states
@@ -31,7 +32,7 @@ export default function LogisticsMenus({ token }) {
 
   const DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
   const DAYS_SHORT = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
-  const MEALS = ['Desayuno', 'Almuerzo', 'Cena'];
+  const MEALS = ['Desayuno', 'Almuerzo', 'Merienda', 'Cena'];
   const todayName = DAYS[(new Date().getDay() + 6) % 7];
   const [requirementDay, setRequirementDay] = useState(todayName);
   const [requirementScope, setRequirementScope] = useState('day');
@@ -89,6 +90,14 @@ export default function LogisticsMenus({ token }) {
     setEditMeal(meal);
     setEditDesc(activeMenu ? activeMenu.description : '');
     setEditIngredients(activeMenu ? activeMenu.ingredients || '' : '');
+
+    const parsed = parseIngredients(activeMenu ? activeMenu.ingredients : '');
+    const mapped = parsed.map(item => ({
+      ...item,
+      isCustom: !inventory.some(inv => inv.item_name === item.name)
+    }));
+    setRecipeItems(mapped.length > 0 ? mapped : [{ name: '', quantity: 1, unit: 'Unidades', isCustom: false }]);
+
     setShowEditModal(true);
   };
 
@@ -97,6 +106,12 @@ export default function LogisticsMenus({ token }) {
     setError('');
     setMessage('');
     setSaving(true);
+
+    const compiledIngredients = recipeItems
+      .filter(item => item.name && item.name.trim())
+      .map(item => `${item.name}: ${item.quantity} ${item.unit}`)
+      .join(', ');
+
     try {
       const res = await fetch(`${API_BASE}/refugios/${refugioId}/menus`, {
         method: 'POST',
@@ -108,7 +123,7 @@ export default function LogisticsMenus({ token }) {
           day_of_week: editDay,
           meal_type: editMeal,
           description: editDesc,
-          ingredients: editIngredients
+          ingredients: compiledIngredients
         })
       });
       if (res.ok) {
@@ -529,28 +544,35 @@ export default function LogisticsMenus({ token }) {
                       <th className="pb-2">Ingrediente</th>
                       <th className="pb-2 text-center">Total {requirementScope === 'week' ? 'Semana' : 'Día'}</th>
                       <th className="pb-2 text-center">Stock</th>
+                      <th className="pb-2 text-center">Disponible Restante</th>
                       <th className="pb-2 text-right">Faltante</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {missingIngredients.map((item, idx) => (
-                      <tr key={idx} className="border-b border-outline-variant/30">
-                        <td className="py-2 font-bold text-on-surface">{item.name}</td>
-                        <td className="py-2 text-center font-mono text-on-surface-variant">{formatQuantity(item.required)}</td>
-                        <td className="py-2 text-center font-mono text-on-surface-variant">{formatQuantity(item.stock)}</td>
-                        <td className="py-2 text-right">
-                          {item.missing > 0 ? (
-                            <span className="px-1.5 py-0.5 bg-error-container/20 text-error font-black rounded text-[8px] font-mono">
-                              +{formatQuantity(item.missing)} {item.unit}
-                            </span>
-                          ) : (
-                            <span className="px-1.5 py-0.5 bg-success/10 text-success font-black rounded text-[8px]">
-                              Cubierto
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {missingIngredients.map((item, idx) => {
+                      const diff = item.stock - item.required;
+                      return (
+                        <tr key={idx} className="border-b border-outline-variant/30">
+                          <td className="py-2 font-bold text-on-surface">{item.name}</td>
+                          <td className="py-2 text-center font-mono text-on-surface-variant">{formatQuantity(item.required)}</td>
+                          <td className="py-2 text-center font-mono text-on-surface-variant">{formatQuantity(item.stock)}</td>
+                          <td className={`py-2 text-center font-mono font-bold ${diff < 0 ? 'text-error' : 'text-success'}`}>
+                            {diff >= 0 ? '+' : ''}{formatQuantity(diff)} {item.unit}
+                          </td>
+                          <td className="py-2 text-right">
+                            {item.missing > 0 ? (
+                              <span className="px-1.5 py-0.5 bg-error-container/20 text-error font-black rounded text-[8px] font-mono">
+                                +{formatQuantity(item.missing)} {item.unit}
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 bg-success/10 text-success font-black rounded text-[8px]">
+                                Cubierto
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {missingIngredients.length === 0 && (
                       <tr>
                         <td colSpan="4" className="py-4 text-center italic text-on-surface-variant">
@@ -705,15 +727,123 @@ export default function LogisticsMenus({ token }) {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-on-surface-variant block mb-1">Ingredientes por Ración</label>
-                <textarea 
-                  value={editIngredients} 
-                  onChange={(e) => setEditIngredients(e.target.value)} 
-                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary h-24 resize-none font-mono"
-                  placeholder="Ej: Arroz: 0.12 kg, Pollo: 0.18 kg, Aceite: 0.02 l&#10;(Cantidad para una sola comida/ración)"
-                />
-                <span className="text-[9px] text-on-surface-variant font-medium mt-1 block leading-tight">
-                  Coloque la cantidad total usada para preparar esta comida completa (por ejemplo: 10 kilos de harina, 1 pote de mantequilla, 4 litros de leche). No se multiplica por comensales.
+                <label className="text-xs font-bold text-on-surface-variant block mb-2">Ingredientes del Menú</label>
+                <div className="max-h-48 overflow-y-auto mb-2 pr-1">
+                  {recipeItems.map((item, index) => (
+                    <div key={index} className="flex gap-1.5 items-center mb-1.5 bg-surface-container-low/40 p-1.5 rounded-lg border border-outline-variant/30">
+                      {item.isCustom ? (
+                        <input
+                          type="text"
+                          value={item.name}
+                          onChange={(e) => {
+                            const updated = [...recipeItems];
+                            updated[index].name = e.target.value;
+                            setRecipeItems(updated);
+                          }}
+                          className="flex-grow bg-surface-container-low border border-outline-variant rounded-lg p-2 text-xs font-bold"
+                          placeholder="Nombre del alimento..."
+                          required
+                        />
+                      ) : (
+                        <select
+                          value={item.name}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const updated = [...recipeItems];
+                            if (val === '__custom__') {
+                              updated[index].isCustom = true;
+                              updated[index].name = '';
+                              updated[index].unit = 'Kilos';
+                            } else {
+                              const invItem = inventory.find(i => i.item_name === val);
+                              updated[index].name = val;
+                              updated[index].unit = invItem ? invItem.unit : 'Unidades';
+                            }
+                            setRecipeItems(updated);
+                          }}
+                          className="flex-grow bg-surface-container-low border border-outline-variant rounded-lg p-2 text-xs focus:outline-none font-bold"
+                        >
+                          <option value="">-- Seleccionar alimento --</option>
+                          {inventory.map(inv => (
+                            <option key={inv.id} value={inv.item_name}>{inv.item_name} ({inv.quantity} {inv.unit})</option>
+                          ))}
+                          <option value="__custom__">+ Otro alimento (no registrado)...</option>
+                        </select>
+                      )}
+
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={item.quantity}
+                        onChange={(e) => {
+                          const updated = [...recipeItems];
+                          updated[index].quantity = parseFloat(e.target.value) || 0;
+                          setRecipeItems(updated);
+                        }}
+                        className="w-16 bg-surface-container-low border border-outline-variant rounded-lg p-2 text-xs text-center font-black"
+                        placeholder="Cant."
+                      />
+
+                      {item.isCustom ? (
+                        <select
+                          value={item.unit}
+                          onChange={(e) => {
+                            const updated = [...recipeItems];
+                            updated[index].unit = e.target.value;
+                            setRecipeItems(updated);
+                          }}
+                          className="w-24 bg-surface-container-low border border-outline-variant rounded-lg p-2 text-xs font-bold focus:outline-none"
+                        >
+                          <option value="Kilos">Kilos</option>
+                          <option value="Litros">Litros</option>
+                          <option value="Paquetes">Paquetes</option>
+                          <option value="Unidades">Unidades</option>
+                          <option value="Gramos">Gramos</option>
+                          <option value="Latas">Latas</option>
+                          <option value="Bolsas">Bolsas</option>
+                          <option value="Cajas">Cajas</option>
+                        </select>
+                      ) : (
+                        <span className="text-[9px] font-bold text-on-surface-variant w-14 truncate">{item.unit || 'uds'}</span>
+                      )}
+
+                      {item.isCustom && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = [...recipeItems];
+                            updated[index].isCustom = false;
+                            updated[index].name = '';
+                            updated[index].unit = 'Unidades';
+                            setRecipeItems(updated);
+                          }}
+                          className="text-on-surface-variant hover:bg-surface-container-high p-1.5 rounded-full cursor-pointer border-0 bg-transparent flex items-center justify-center shrink-0"
+                          title="Volver a seleccionar de inventario"
+                        >
+                          <span className="material-symbols-outlined text-sm">settings_backup_restore</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setRecipeItems(recipeItems.filter((_, i) => i !== index))}
+                        className="text-error hover:bg-error/10 p-1.5 rounded-full cursor-pointer border-0 bg-transparent flex items-center justify-center shrink-0"
+                      >
+                        <span className="material-symbols-outlined text-sm">delete</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRecipeItems([...recipeItems, { name: '', quantity: 1, unit: 'Unidades', isCustom: false }])}
+                  className="text-primary text-[10px] font-bold flex items-center gap-1 mt-1 cursor-pointer border-0 bg-transparent"
+                >
+                  <span className="material-symbols-outlined text-xs">add</span> Añadir ingrediente
+                </button>
+                <span className="text-[8px] text-on-surface-variant font-medium mt-2 block leading-tight">
+                  Coloque la cantidad total usada para preparar esta comida completa (por ejemplo: 10 kilos de harina, 1 pote de mantequilla, 4 litros de leche).
                 </span>
               </div>
 

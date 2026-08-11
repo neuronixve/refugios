@@ -90,9 +90,11 @@ CREATE TABLE IF NOT EXISTS inventory (
     refugio_id INTEGER REFERENCES refugios(id) ON DELETE CASCADE,
     item_name VARCHAR(100) NOT NULL,
     category VARCHAR(50) NOT NULL, -- 'Alimentos', 'Medicinas', 'Higiene', 'Camas/Colchones', 'Ropa'
-    quantity INTEGER NOT NULL DEFAULT 0,
-    min_threshold INTEGER NOT NULL DEFAULT 5,
+    quantity NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    min_threshold NUMERIC(12,2) NOT NULL DEFAULT 5.00,
     unit VARCHAR(20) DEFAULT 'unidades',
+    sub_unit VARCHAR(20) DEFAULT NULL,
+    units_per_package INTEGER DEFAULT 1,
     status VARCHAR(50) DEFAULT 'Stock Suficiente', -- 'Stock Suficiente', 'Stock Crítico', 'Sin Stock'
     updated_at TIMESTAMP DEFAULT NOW()
 );

@@ -138,11 +138,32 @@ export default function MedicationDelivery({ token }) {
       return sameName && sameIndex;
     })
     : [];
-  const deliveredTotal = treatmentDeliveries.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
+  const deliveredTotal = treatmentDeliveries.reduce((sum, item) => {
+    const qty = parseFloat(item.quantity) || 0;
+    const factor = parseInt(item.inventory_units_per_package) || 1;
+    const subUnit = item.inventory_sub_unit;
+    const dUnit = item.unit;
+
+    if (subUnit && dUnit && dUnit.toLowerCase() === subUnit.toLowerCase() && factor > 1) {
+      return sum + (qty / factor);
+    }
+    return sum + qty;
+  }, 0);
   const totalRequired = selectedTreatment ? parseFloat(selectedTreatment.totalQuantity) : NaN;
   const hasTotalControl = Number.isFinite(totalRequired) && totalRequired > 0;
   const remaining = hasTotalControl ? Math.max(totalRequired - deliveredTotal, 0) : null;
   const selectedInventory = inventory.find(item => String(item.id) === String(inventoryItemId));
+
+  const availableUnits = useMemo(() => {
+    if (selectedInventory) {
+      const list = [selectedInventory.unit || 'Unidades'];
+      if (selectedInventory.sub_unit && selectedInventory.units_per_package > 1) {
+        list.push(selectedInventory.sub_unit);
+      }
+      return list;
+    }
+    return DELIVERY_UNITS;
+  }, [selectedInventory]);
 
   const filteredResidents = residents.filter(res => {
     const query = searchTerm.toLowerCase();
@@ -188,8 +209,17 @@ export default function MedicationDelivery({ token }) {
       return;
     }
 
-    if (hasTotalControl && qty > remaining) {
-      setError(`No puede entregar más de lo indicado. Saldo disponible para este tratamiento: ${formatQty(remaining)} ${selectedTreatment.unit || unit}.`);
+    let qtyToDiscount = qty;
+    if (selectedInventory) {
+      const factor = parseInt(selectedInventory.units_per_package) || 1;
+      const subUnit = selectedInventory.sub_unit;
+      if (subUnit && unit && unit.toLowerCase() === subUnit.toLowerCase() && factor > 1) {
+        qtyToDiscount = qty / factor;
+      }
+    }
+
+    if (hasTotalControl && qtyToDiscount > remaining) {
+      setError(`No puede entregar más de lo indicado. Saldo disponible para este tratamiento: ${formatQty(remaining)} ${selectedTreatment.unit || selectedInventory?.unit || 'unidades'}.`);
       return;
     }
 
@@ -339,20 +369,61 @@ export default function MedicationDelivery({ token }) {
                     <label className="text-[10px] font-black text-on-surface-variant uppercase block mb-1">Medicamento del Inventario de Salud</label>
                     <select
                       value={inventoryItemId}
-                      onChange={e => setInventoryItemId(e.target.value)}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setInventoryItemId(val);
+                        const matchedItem = inventory.find(item => String(item.id) === String(val));
+                        if (matchedItem) {
+                          setUnit(matchedItem.unit || 'Unidades');
+                        }
+                      }}
                       className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none font-bold"
                       required
                     >
                       <option value="">-- Seleccionar inventario --</option>
-                      {inventory.map(item => (
-                        <option key={item.id} value={item.id}>
-                          {item.item_name} | Stock: {formatQty(item.quantity)} {item.unit || 'unidades'}
-                        </option>
-                      ))}
+                      {inventory.map(item => {
+                        const qty = parseFloat(item.quantity) || 0;
+                        const factor = parseInt(item.units_per_package) || 1;
+                        let text = `${item.item_name} | Stock: ${formatQty(item.quantity)} ${item.unit || 'unidades'}`;
+                        if (factor > 1 && item.sub_unit) {
+                          const whole = Math.floor(qty);
+                          const fraction = qty - whole;
+                          const subQty = Math.round(fraction * factor);
+                          if (whole > 0 && subQty > 0) {
+                            text += ` (${whole} ${item.unit} y ${subQty} ${item.sub_unit})`;
+                          } else if (whole > 0) {
+                            text += ` (${whole} ${item.unit})`;
+                          } else {
+                            text += ` (${subQty} ${item.sub_unit})`;
+                          }
+                        }
+                        return (
+                          <option key={item.id} value={item.id}>
+                            {text}
+                          </option>
+                        );
+                      })}
                     </select>
                     {selectedInventory && (
                       <p className="mt-1 text-[10px] font-bold text-on-surface-variant">
-                        Stock disponible: {formatQty(selectedInventory.quantity)} {selectedInventory.unit || 'unidades'}
+                        Stock disponible: {(() => {
+                          const qty = parseFloat(selectedInventory.quantity) || 0;
+                          const factor = parseInt(selectedInventory.units_per_package) || 1;
+                          let text = `${formatQty(selectedInventory.quantity)} ${selectedInventory.unit || 'unidades'}`;
+                          if (factor > 1 && selectedInventory.sub_unit) {
+                            const whole = Math.floor(qty);
+                            const fraction = qty - whole;
+                            const subQty = Math.round(fraction * factor);
+                            if (whole > 0 && subQty > 0) {
+                              text += ` (${whole} ${selectedInventory.unit} y ${subQty} ${selectedInventory.sub_unit})`;
+                            } else if (whole > 0) {
+                              text += ` (${whole} ${selectedInventory.unit})`;
+                            } else {
+                              text += ` (${subQty} ${selectedInventory.sub_unit})`;
+                            }
+                          }
+                          return text;
+                        })()}
                       </p>
                     )}
                   </div>
@@ -377,7 +448,7 @@ export default function MedicationDelivery({ token }) {
                         onChange={e => setUnit(e.target.value)}
                         className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none font-bold"
                       >
-                        {DELIVERY_UNITS.map(option => <option key={option} value={option}>{option}</option>)}
+                        {availableUnits.map(option => <option key={option} value={option}>{option}</option>)}
                       </select>
                     </div>
                   </div>

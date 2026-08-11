@@ -80,6 +80,10 @@ async function initDb() {
     await runMigration('refugios.image_url', 'ALTER TABLE refugios ADD COLUMN IF NOT EXISTS image_url TEXT');
     await runMigration('incidents.involved_residents', 'ALTER TABLE incidents ADD COLUMN IF NOT EXISTS involved_residents TEXT DEFAULT \'[]\'');
     await runMigration('inventory.deposito_id', 'ALTER TABLE inventory ADD COLUMN IF NOT EXISTS deposito_id INTEGER REFERENCES depositos(id) ON DELETE SET NULL');
+    await runMigration('inventory.quantity to numeric', 'ALTER TABLE inventory ALTER COLUMN quantity TYPE NUMERIC(12,2)');
+    await runMigration('inventory.min_threshold to numeric', 'ALTER TABLE inventory ALTER COLUMN min_threshold TYPE NUMERIC(12,2)');
+    await runMigration('inventory.units_per_package', 'ALTER TABLE inventory ADD COLUMN IF NOT EXISTS units_per_package INTEGER DEFAULT 1');
+    await runMigration('inventory.sub_unit', 'ALTER TABLE inventory ADD COLUMN IF NOT EXISTS sub_unit VARCHAR(20) DEFAULT NULL');
     await runMigration('users.card_printed', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS card_printed BOOLEAN DEFAULT FALSE');
     await runMigration('refugios.staff_config', "ALTER TABLE refugios ADD COLUMN IF NOT EXISTS staff_config TEXT DEFAULT '{}'");
     await runMigration('menus.diets_json', "ALTER TABLE menus ADD COLUMN IF NOT EXISTS diets_json TEXT DEFAULT '{}'");
@@ -155,7 +159,11 @@ async function seedAdmin() {
 // Middleware de Autenticación
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  let token = authHeader && authHeader.split(' ')[1];
+  
+  if (!token && req.query.token) {
+    token = req.query.token;
+  }
   
   if (!token) return res.status(401).json({ error: 'Acceso denegado. Token no suministrado.' });
 
@@ -202,16 +210,17 @@ const getCurrentMealWindow = (date = new Date()) => {
   if (minutes >= 6 * 60 && minutes <= 11 * 60) {
     return { mealType: 'Desayuno', label: '06:00 AM - 11:00 AM' };
   }
-  if (minutes >= 11 * 60 + 30 && minutes <= 16 * 60 + 30) {
-    return { mealType: 'Almuerzo', label: '11:30 AM - 04:30 PM' };
+  if (minutes >= 11 * 60 + 30 && minutes < 15 * 60) {
+    return { mealType: 'Almuerzo', label: '11:30 AM - 03:00 PM' };
+  }
+  if (minutes >= 15 * 60 && minutes <= 16 * 60) {
+    return { mealType: 'Merienda', label: '03:00 PM - 04:00 PM' };
   }
   if (minutes >= 17 * 60 + 30 && minutes <= 22 * 60) {
     return { mealType: 'Cena', label: '05:30 PM - 10:00 PM' };
   }
   return null;
 };
-
-// --- RUTAS DE AUTENTICACIÓN ---
 
 // Login
 app.post('/api/auth/login', async (req, res) => {
@@ -1647,10 +1656,9 @@ app.get('/api/refugios/:refugio_id/health-inventory', authenticateToken, async (
     res.status(500).json({ error: 'Error al obtener inventario de salud.' });
   }
 });
-
 app.post('/api/refugios/:refugio_id/health-inventory', authenticateToken, requireMedicalInventoryWriter, async (req, res) => {
   const { refugio_id } = req.params;
-  const { id, item_name, category, quantity, min_threshold, unit } = req.body;
+  const { id, item_name, category, quantity, min_threshold, unit, units_per_package, sub_unit } = req.body;
   if (!item_name || quantity === undefined) {
     return res.status(400).json({ error: 'Insumo y cantidad son requeridos.' });
   }
@@ -1666,11 +1674,11 @@ app.post('/api/refugios/:refugio_id/health-inventory', authenticateToken, requir
       result = await db.query(
         `UPDATE inventory
          SET item_name = $1, category = $2, quantity = $3, min_threshold = $4,
-             unit = $5, status = $6, updated_at = NOW()
-         WHERE id = $7 AND refugio_id = $8 AND deposito_id = $9
+             unit = $5, status = $6, units_per_package = $7, sub_unit = $8, updated_at = NOW()
+         WHERE id = $9 AND refugio_id = $10 AND deposito_id = $11
          RETURNING *`,
         [item_name, category || 'Medicinas', qtyVal, minVal, unit || 'Unidades', status,
-          parseInt(id), parseInt(refugio_id), deposito.id]
+          units_per_package || 1, sub_unit || null, parseInt(id), parseInt(refugio_id), deposito.id]
       );
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'El insumo no pertenece al inventario de salud de esta sede.' });
@@ -1678,11 +1686,11 @@ app.post('/api/refugios/:refugio_id/health-inventory', authenticateToken, requir
     } else {
       result = await db.query(
         `INSERT INTO inventory
-         (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id, units_per_package, sub_unit)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING *`,
         [parseInt(refugio_id), item_name, category || 'Medicinas', qtyVal, minVal,
-          unit || 'Unidades', status, deposito.id]
+          unit || 'Unidades', status, deposito.id, units_per_package || 1, sub_unit || null]
       );
     }
 
@@ -1722,9 +1730,210 @@ app.get('/api/refugios/:refugio_id/inventory', authenticateToken, async (req, re
   }
 });
 
+app.get('/api/refugios/:refugio_id/inventory/download', authenticateToken, async (req, res) => {
+  const refugio_id = parseInt(req.params.refugio_id);
+  const type = req.query.type || 'general';
+  try {
+    const refRes = await db.query('SELECT name FROM refugios WHERE id = $1', [refugio_id]);
+    const refugioName = refRes.rows.length > 0 ? refRes.rows[0].name : 'Sede ' + refugio_id;
+
+    let items = [];
+    let title = '';
+    
+    if (type === 'health') {
+      title = 'Inventario del Servicio Médico - ' + refugioName;
+      const healthDep = await getOrCreateHealthDeposito(db, refugio_id);
+      const itemsRes = await db.query(
+        'SELECT i.*, d.name as deposito_name ' +
+        'FROM inventory i ' +
+        'LEFT JOIN depositos d ON i.deposito_id = d.id ' +
+        'WHERE i.refugio_id = $1 AND i.deposito_id = $2 ' +
+        'ORDER BY i.item_name ASC',
+        [refugio_id, healthDep.id]
+      );
+      items = itemsRes.rows;
+    } else if (type === 'kitchen') {
+      title = 'Inventario de Cocina - ' + refugioName;
+      const cocDepRes = await db.query(
+        "SELECT id FROM depositos WHERE refugio_id = $1 AND name ILIKE '%cocina%' LIMIT 1",
+        [refugio_id]
+      );
+      if (cocDepRes.rows.length > 0) {
+        const itemsRes = await db.query(
+          'SELECT i.*, d.name as deposito_name ' +
+          'FROM inventory i ' +
+          'LEFT JOIN depositos d ON i.deposito_id = d.id ' +
+          'WHERE i.refugio_id = $1 AND i.deposito_id = $2 ' +
+          'ORDER BY i.item_name ASC',
+          [refugio_id, cocDepRes.rows[0].id]
+        );
+        items = itemsRes.rows;
+      }
+    } else {
+      title = 'Inventario General de Almacén - ' + refugioName;
+      const itemsRes = await db.query(
+        'SELECT i.*, d.name as deposito_name ' +
+        'FROM inventory i ' +
+        'LEFT JOIN depositos d ON i.deposito_id = d.id ' +
+        'WHERE i.refugio_id = $1 ' +
+        'ORDER BY i.item_name ASC',
+        [refugio_id]
+      );
+      items = itemsRes.rows.filter(function(item) {
+        const depName = (item.deposito_name || '').toLowerCase();
+        return !depName.includes('cocina') && !depName.includes('médico') && !depName.includes('medico') && !depName.includes('salud');
+      });
+    }
+
+    const ExcelJS = require('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Inventario');
+
+    worksheet.mergeCells('A1:F1');
+    const titleCell = worksheet.getCell('A1');
+    titleCell.value = title.toUpperCase();
+    titleCell.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B2347' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getRow(1).height = 45;
+
+    const path = require('path');
+    const fs = require('fs');
+
+    const sarenLogoPath = path.join(__dirname, '../frontend/public/logo-saren.png');
+    const campamentoLogoPath = path.join(__dirname, '../frontend/public/campamento-logo-transparente.png');
+
+    if (fs.existsSync(campamentoLogoPath)) {
+      try {
+        const imageId = workbook.addImage({
+          filename: campamentoLogoPath,
+          extension: 'png',
+        });
+        worksheet.addImage(imageId, {
+          tl: { col: 0.1, row: 0.15 },
+          ext: { width: 42, height: 35 }
+        });
+      } catch (e) {
+        console.error('Error adding campamento logo to excel:', e);
+      }
+    }
+
+    if (fs.existsSync(sarenLogoPath)) {
+      try {
+        const imageId = workbook.addImage({
+          filename: sarenLogoPath,
+          extension: 'png',
+        });
+        worksheet.addImage(imageId, {
+          tl: { col: 5.2, row: 0.15 },
+          ext: { width: 80, height: 35 }
+        });
+      } catch (e) {
+        console.error('Error adding saren logo to excel:', e);
+      }
+    }
+
+    worksheet.addRow([]);
+
+    const headers = ['Insumo', 'Categoría', 'Depósito', 'Stock Actual', 'Mínimo Crítico', 'Estado'];
+    worksheet.addRow(headers);
+    
+    const headerRow = worksheet.getRow(3);
+    headerRow.height = 25;
+    headerRow.eachCell(function(cell) {
+      cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'medium' },
+        right: { style: 'thin' }
+      };
+    });
+
+    items.forEach(function(item) {
+      const qty = parseFloat(item.quantity) || 0;
+      const min = parseFloat(item.min_threshold) || 0;
+      const status = qty === 0 ? 'SIN STOCK' : (qty <= min ? 'STOCK CRÍTICO' : 'SUMINISTRO SUFICIENTE');
+      const unitStr = item.unit || 'unidades';
+
+      let stockStr = qty + ' ' + unitStr;
+      if (item.units_per_package && item.units_per_package > 1 && item.sub_unit) {
+        const whole = Math.floor(qty);
+        const fraction = qty % 1;
+        const subQty = Math.round(fraction * item.units_per_package);
+        if (whole > 0 && subQty > 0) {
+          stockStr = qty + ' ' + unitStr + ' (' + whole + ' ' + unitStr + ' y ' + subQty + ' ' + item.sub_unit + ')';
+        } else if (whole > 0) {
+          stockStr = qty + ' ' + unitStr + ' (' + whole + ' ' + unitStr + ')';
+        } else {
+          stockStr = qty + ' ' + unitStr + ' (' + subQty + ' ' + item.sub_unit + ')';
+        }
+      }
+
+      const rowData = [
+        item.item_name,
+        item.category,
+        item.deposito_name || 'Bodega Central',
+        stockStr,
+        min + ' ' + unitStr,
+        status
+      ];
+      worksheet.addRow(rowData);
+    });
+
+    for (let i = 4; i <= worksheet.rowCount; i++) {
+      const row = worksheet.getRow(i);
+      row.height = 20;
+      row.eachCell(function(cell, colIndex) {
+        cell.font = { name: 'Arial', size: 9 };
+        cell.alignment = { 
+          horizontal: (colIndex === 4 || colIndex === 5 || colIndex === 6) ? 'center' : 'left',
+          vertical: 'middle' 
+        };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        };
+
+        if (i % 2 === 0) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9FAFB' } };
+        }
+
+        if (colIndex === 6) {
+          const val = String(cell.value);
+          if (val === 'SIN STOCK') {
+            cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF991B1B' } };
+          } else if (val === 'STOCK CRÍTICO') {
+            cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF92400E' } };
+          } else {
+            cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF065F46' } };
+          }
+        }
+      });
+    }
+
+    const colWidths = [30, 20, 25, 35, 20, 25];
+    colWidths.forEach(function(w, index) {
+      worksheet.getColumn(index + 1).width = w;
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=inventario_' + (type || 'general') + '_sede_' + refugio_id + '.xlsx');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Error generating inventory Excel:', err);
+    res.status(500).json({ error: 'No se pudo generar el reporte en Excel.' });
+  }
+});
+
 app.post('/api/refugios/:refugio_id/inventory', authenticateToken, denyMedicalGeneralInventoryWrite, async (req, res) => {
   const { refugio_id } = req.params;
-  const { id, item_name, category, quantity, min_threshold, unit, deposito_id } = req.body;
+  const { id, item_name, category, quantity, min_threshold, unit, deposito_id, units_per_package, sub_unit } = req.body;
   if (!item_name || !category || quantity === undefined) {
     return res.status(400).json({ error: 'Insumo, categoría y cantidad son requeridos.' });
   }
@@ -1737,26 +1946,41 @@ app.post('/api/refugios/:refugio_id/inventory', authenticateToken, denyMedicalGe
     let result;
     if (id) {
       result = await db.query(
-        `INSERT INTO inventory (id, refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `INSERT INTO inventory (id, refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id, units_per_package, sub_unit)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (id) DO UPDATE 
          SET item_name = EXCLUDED.item_name, category = EXCLUDED.category, quantity = EXCLUDED.quantity, 
-             min_threshold = EXCLUDED.min_threshold, unit = EXCLUDED.unit, status = EXCLUDED.status, deposito_id = EXCLUDED.deposito_id, updated_at = NOW()
+             min_threshold = EXCLUDED.min_threshold, unit = EXCLUDED.unit, status = EXCLUDED.status, 
+             deposito_id = EXCLUDED.deposito_id, units_per_package = EXCLUDED.units_per_package, sub_unit = EXCLUDED.sub_unit, updated_at = NOW()
          RETURNING *`,
-        [parseInt(id), parseInt(refugio_id), item_name, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null]
+        [parseInt(id), parseInt(refugio_id), item_name, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null, units_per_package || 1, sub_unit || null]
       );
     } else {
       result = await db.query(
-        `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id, units_per_package, sub_unit)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING *`,
-        [parseInt(refugio_id), item_name, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null]
+        [parseInt(refugio_id), item_name, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null, units_per_package || 1, sub_unit || null]
       );
     }
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al guardar inventario.' });
+  }
+});
+
+app.delete('/api/refugios/:refugio_id/inventory/:id', authenticateToken, denyMedicalGeneralInventoryWrite, async (req, res) => {
+  try {
+    const result = await db.query(
+      `DELETE FROM inventory WHERE id = $1 AND refugio_id = $2 RETURNING id, item_name`,
+      [parseInt(req.params.id), parseInt(req.params.refugio_id)]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Insumo no encontrado.' });
+    res.json({ message: `El insumo ${result.rows[0].item_name} fue eliminado.` });
+  } catch (err) {
+    console.error('Error al eliminar insumo:', err);
+    res.status(500).json({ error: 'No se pudo eliminar el insumo.' });
   }
 });
 
@@ -1864,13 +2088,14 @@ app.get('/api/refugios/:refugio_id/medication-deliveries', authenticateToken, as
     }
 
     const result = await db.query(
-      `SELECT md.*, d.first_name, d.last_name, d.document_id, i.item_name as inventory_item_name, u.name as delivered_by_name
-       FROM medication_deliveries md
-       JOIN damnificados d ON md.resident_id = d.id
-       LEFT JOIN inventory i ON md.inventory_item_id = i.id
-       LEFT JOIN users u ON md.delivered_by = u.id
-       ${where}
-       ORDER BY md.delivered_at DESC`,
+      'SELECT md.*, d.first_name, d.last_name, d.document_id, i.item_name as inventory_item_name, u.name as delivered_by_name, ' +
+      'i.unit as inventory_unit, i.sub_unit as inventory_sub_unit, i.units_per_package as inventory_units_per_package ' +
+      'FROM medication_deliveries md ' +
+      'JOIN damnificados d ON md.resident_id = d.id ' +
+      'LEFT JOIN inventory i ON md.inventory_item_id = i.id ' +
+      'LEFT JOIN users u ON md.delivered_by = u.id ' +
+      where + ' ' +
+      'ORDER BY md.delivered_at DESC',
       params
     );
     res.json(result.rows);
@@ -1927,35 +2152,12 @@ app.post('/api/refugios/:refugio_id/medication-deliveries', authenticateToken, r
       treatment = null;
     }
 
-    const totalRequired = treatment ? parseFloat(treatment.totalQuantity) : NaN;
-    if (Number.isFinite(totalRequired) && totalRequired > 0) {
-      const deliveredParams = [parseInt(refugio_id), parseInt(resident_id), medication_name];
-      let deliveredWhere = 'refugio_id = $1 AND resident_id = $2 AND medication_name = $3';
-      if (Number.isInteger(medicationIndexValue)) {
-        deliveredParams.push(medicationIndexValue);
-        deliveredWhere += ` AND medication_index = $${deliveredParams.length}`;
-      }
-      const deliveredRes = await client.query(
-        `SELECT COALESCE(SUM(quantity), 0)::numeric as delivered
-         FROM medication_deliveries
-         WHERE ${deliveredWhere}`,
-        deliveredParams
-      );
-      const alreadyDelivered = parseFloat(deliveredRes.rows[0].delivered) || 0;
-      if (alreadyDelivered + qty > totalRequired) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          error: `La entrega supera lo indicado para este tratamiento. Indicado: ${totalRequired}, entregado: ${alreadyDelivered}, saldo: ${Math.max(totalRequired - alreadyDelivered, 0)}.`
-        });
-      }
-    }
-
     const inventoryRes = await client.query(
-      `SELECT i.id, i.item_name, i.quantity, i.min_threshold, i.unit
-       FROM inventory i
-       JOIN depositos d ON i.deposito_id = d.id
-       WHERE i.id = $1 AND i.refugio_id = $2 AND ${HEALTH_DEPOSITO_FILTER}
-       FOR UPDATE OF i`,
+      'SELECT i.id, i.item_name, i.quantity, i.min_threshold, i.unit, i.sub_unit, i.units_per_package ' +
+      'FROM inventory i ' +
+      'JOIN depositos d ON i.deposito_id = d.id ' +
+      'WHERE i.id = $1 AND i.refugio_id = $2 AND ' + HEALTH_DEPOSITO_FILTER + ' ' +
+      'FOR UPDATE OF i',
       [parseInt(inventory_item_id), parseInt(refugio_id)]
     );
     if (inventoryRes.rows.length === 0) {
@@ -1963,17 +2165,64 @@ app.post('/api/refugios/:refugio_id/medication-deliveries', authenticateToken, r
       return res.status(404).json({ error: 'Medicamento no encontrado en el inventario de salud.' });
     }
 
-    const stock = parseFloat(inventoryRes.rows[0].quantity) || 0;
-    if (stock < qty) {
+    const item = inventoryRes.rows[0];
+    const mainUnit = item.unit || 'unidades';
+    const subUnit = item.sub_unit;
+    const factor = parseInt(item.units_per_package) || 1;
+
+    let qtyToDiscount = qty;
+    if (subUnit && unit && unit.toLowerCase() === subUnit.toLowerCase() && factor > 1) {
+      qtyToDiscount = qty / factor;
+    }
+
+    const totalRequired = treatment ? parseFloat(treatment.totalQuantity) : NaN;
+    if (Number.isFinite(totalRequired) && totalRequired > 0) {
+      const deliveredParams = [parseInt(refugio_id), parseInt(resident_id), medication_name];
+      let deliveredWhere = 'refugio_id = $1 AND resident_id = $2 AND medication_name = $3';
+      if (Number.isInteger(medicationIndexValue)) {
+        deliveredParams.push(medicationIndexValue);
+        deliveredWhere += ' AND medication_index = $' + deliveredParams.length;
+      }
+      const deliveredRes = await client.query(
+        'SELECT quantity, unit ' +
+        'FROM medication_deliveries ' +
+        'WHERE ' + deliveredWhere,
+        deliveredParams
+      );
+
+      let alreadyDelivered = 0;
+      deliveredRes.rows.forEach(row => {
+        const dQty = parseFloat(row.quantity) || 0;
+        const dUnit = row.unit;
+        if (subUnit && dUnit && dUnit.toLowerCase() === subUnit.toLowerCase() && factor > 1) {
+          alreadyDelivered += dQty / factor;
+        } else {
+          alreadyDelivered += dQty;
+        }
+      });
+
+      if (alreadyDelivered + qtyToDiscount > totalRequired) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: 'La entrega supera lo indicado para este tratamiento. Indicado: ' + totalRequired + ' ' + mainUnit + ', entregado: ' + alreadyDelivered.toFixed(2) + ' ' + mainUnit + ', saldo: ' + Math.max(totalRequired - alreadyDelivered, 0).toFixed(2) + ' ' + mainUnit + '.'
+        });
+      }
+    }
+
+    const stock = parseFloat(item.quantity) || 0;
+    if (stock < qtyToDiscount) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: `Stock insuficiente. Disponible: ${stock} ${inventoryRes.rows[0].unit || unit || 'unidades'}.` });
+      const dispText = factor > 1 && subUnit 
+        ? stock + ' ' + mainUnit + ' (equivalente a ' + Math.round(stock * factor) + ' ' + subUnit + ')'
+        : stock + ' ' + mainUnit;
+      return res.status(400).json({ error: 'Stock insuficiente. Disponible: ' + dispText + '.' });
     }
 
     const result = await client.query(
-      `INSERT INTO medication_deliveries
-       (refugio_id, resident_id, inventory_item_id, medication_index, medication_name, dose, quantity, unit, delivery_frequency, notes, delivered_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING *`,
+      'INSERT INTO medication_deliveries ' +
+      '(refugio_id, resident_id, inventory_item_id, medication_index, medication_name, dose, quantity, unit, delivery_frequency, notes, delivered_by) ' +
+      'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ' +
+      'RETURNING *',
       [
         parseInt(refugio_id),
         parseInt(resident_id),
@@ -1982,7 +2231,7 @@ app.post('/api/refugios/:refugio_id/medication-deliveries', authenticateToken, r
         medication_name,
         dose || treatment?.dose || null,
         qty,
-        unit || inventoryRes.rows[0].unit || 'Dosis',
+        unit || item.unit || 'Dosis',
         delivery_frequency || treatment?.deliveryFrequency || 'Única',
         notes || null,
         req.user.id
@@ -1990,16 +2239,16 @@ app.post('/api/refugios/:refugio_id/medication-deliveries', authenticateToken, r
     );
 
     await client.query(
-      `UPDATE inventory
-       SET quantity = quantity - $1,
-           status = CASE
-             WHEN quantity - $1 <= 0 THEN 'Sin Stock'
-             WHEN quantity - $1 <= min_threshold THEN 'Stock Crítico'
-             ELSE 'Stock Suficiente'
-           END,
-           updated_at = NOW()
-       WHERE id = $2`,
-      [qty, parseInt(inventory_item_id)]
+      'UPDATE inventory ' +
+      'SET quantity = quantity - $1, ' +
+      '    status = CASE ' +
+      '      WHEN quantity - $1 <= 0 THEN \'Sin Stock\' ' +
+      '      WHEN quantity - $1 <= min_threshold THEN \'Stock Crítico\' ' +
+      '      ELSE \'Stock Suficiente\' ' +
+      '    END, ' +
+      '    updated_at = NOW() ' +
+      'WHERE id = $2',
+      [qtyToDiscount, parseInt(inventory_item_id)]
     );
 
     await client.query('COMMIT');
@@ -2108,7 +2357,7 @@ app.post('/api/meals/attendance', authenticateToken, async (req, res) => {
   const currentMeal = getCurrentMealWindow();
   if (!currentMeal) {
     return res.status(400).json({
-      error: 'Fuera del horario de servicio de comida. Horarios: Desayuno 06:00-11:00, Almuerzo 11:30-16:30, Cena 17:30-22:00.'
+      error: 'Fuera del horario de servicio de comida. Horarios: Desayuno 06:00-11:00, Almuerzo 11:30-15:00, Merienda 15:00-16:00, Cena 17:30-22:00.'
     });
   }
 

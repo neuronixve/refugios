@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 
 const MEAL_WINDOWS = [
   { mealType: 'Desayuno', label: '06:00 AM - 11:00 AM', start: 6 * 60, end: 11 * 60 },
-  { mealType: 'Almuerzo', label: '11:30 AM - 04:30 PM', start: 11 * 60 + 30, end: 16 * 60 + 30 },
+  { mealType: 'Almuerzo', label: '11:30 AM - 03:00 PM', start: 11 * 60 + 30, end: 15 * 60 },
+  { mealType: 'Merienda', label: '03:00 PM - 04:00 PM', start: 15 * 60, end: 16 * 60 },
   { mealType: 'Cena', label: '05:30 PM - 10:00 PM', start: 17 * 60 + 30, end: 22 * 60 }
 ];
 
@@ -74,14 +75,16 @@ export default function LogisticsPanel({ token }) {
   const totalCenso = residents.length || 1;
   const desayunoCount = attendance.filter(a => a.meal_type === 'Desayuno').length;
   const almuerzoCount = attendance.filter(a => a.meal_type === 'Almuerzo').length;
+  const meriendaCount = attendance.filter(a => a.meal_type === 'Merienda').length;
   const cenaCount = attendance.filter(a => a.meal_type === 'Cena').length;
 
   const desayunoPercent = Math.min(100, Math.round((desayunoCount / totalCenso) * 100));
   const almuerzoPercent = Math.min(100, Math.round((almuerzoCount / totalCenso) * 100));
+  const meriendaPercent = Math.min(100, Math.round((meriendaCount / totalCenso) * 100));
   const cenaPercent = Math.min(100, Math.round((cenaCount / totalCenso) * 100));
 
-  const totalServidoHoy = desayunoCount + almuerzoCount + cenaCount;
-  const totalObjetivoHoy = totalCenso * 3;
+  const totalServidoHoy = desayunoCount + almuerzoCount + meriendaCount + cenaCount;
+  const totalObjetivoHoy = totalCenso * 4;
 
   // Dietary constraints counters (using regex on health_status & special_needs)
   const getDietCounts = () => {
@@ -146,7 +149,7 @@ export default function LogisticsPanel({ token }) {
               </div>
 
               {/* Meals Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 
                 {/* Desayuno */}
                 <div className="bg-surface-container-low border border-outline-variant/40 rounded-2xl p-5 flex flex-col gap-3">
@@ -173,6 +176,20 @@ export default function LogisticsPanel({ token }) {
                   </div>
                   <span className="text-[10px] text-on-surface-variant font-bold font-mono">
                     {almuerzoCount} / {totalCenso} servidos
+                  </span>
+                </div>
+
+                {/* Merienda */}
+                <div className="bg-surface-container-low border border-outline-variant/40 rounded-2xl p-5 flex flex-col gap-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-black text-on-surface-variant uppercase tracking-wider">Merienda</span>
+                    <span className="text-xs font-black text-primary">{meriendaPercent}%</span>
+                  </div>
+                  <div className="w-full bg-surface-container rounded-full h-1.5">
+                    <div className="bg-primary h-1.5 rounded-full" style={{ width: `${meriendaPercent}%` }}></div>
+                  </div>
+                  <span className="text-[10px] text-on-surface-variant font-bold font-mono">
+                    {meriendaCount} / {totalCenso} servidos
                   </span>
                 </div>
 
