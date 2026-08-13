@@ -1,6 +1,94 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 
+const getUnitOptions = (category) => {
+  switch (category) {
+    case 'Alimentos':
+      return [
+        { value: 'Kilos', label: 'Kilos' },
+        { value: 'Litros', label: 'Litros' },
+        { value: 'Sacos', label: 'Sacos' },
+        { value: 'Bolsas', label: 'Bolsas' },
+        { value: 'Cajas', label: 'Cajas' },
+        { value: 'Latas', label: 'Latas' },
+        { value: 'Unidades', label: 'Unidades' },
+        { value: 'Packs', label: 'Packs' }
+      ];
+    case 'Medicinas':
+      return [
+        { value: 'Cajas', label: 'Cajas' },
+        { value: 'Blisters', label: 'Blisters' },
+        { value: 'Frascos', label: 'Frascos' },
+        { value: 'Viales', label: 'Viales' },
+        { value: 'Ampollas', label: 'Ampollas' },
+        { value: 'Tabletas', label: 'Tabletas' },
+        { value: 'Pomos', label: 'Pomos' },
+        { value: 'Unidades', label: 'Unidades' }
+      ];
+    case 'Equipos Medicos':
+      return [
+        { value: 'Unidades', label: 'Unidades' },
+        { value: 'Cajas', label: 'Cajas' },
+        { value: 'Packs', label: 'Packs' }
+      ];
+    case 'Mobiliario':
+      return [
+        { value: 'Unidades', label: 'Unidades' },
+        { value: 'Cajas', label: 'Cajas' }
+      ];
+    case 'Equipos Tecnologicos':
+      return [
+        { value: 'Unidades', label: 'Unidades' },
+        { value: 'Cajas', label: 'Cajas' },
+        { value: 'Packs', label: 'Packs' }
+      ];
+    case 'Articulos de Cocina':
+      return [
+        { value: 'Unidades', label: 'Unidades' },
+        { value: 'Paquetes', label: 'Paquetes' },
+        { value: 'Cajas', label: 'Cajas' },
+        { value: 'Kilos', label: 'Kilos' }
+      ];
+    case 'Aseo Personal':
+      return [
+        { value: 'Unidades', label: 'Unidades' },
+        { value: 'Paquetes', label: 'Paquetes' },
+        { value: 'Cajas', label: 'Cajas' },
+        { value: 'Litros', label: 'Litros' },
+        { value: 'Galones', label: 'Galones' },
+        { value: 'Packs', label: 'Packs' }
+      ];
+    case 'Articulos de Limpieza':
+      return [
+        { value: 'Unidades', label: 'Unidades' },
+        { value: 'Galones', label: 'Galones' },
+        { value: 'Litros', label: 'Litros' },
+        { value: 'Paquetes', label: 'Paquetes' },
+        { value: 'Cajas', label: 'Cajas' }
+      ];
+    case 'Camas/Colchones':
+      return [
+        { value: 'Unidades', label: 'Unidades' },
+        { value: 'Packs', label: 'Packs' }
+      ];
+    case 'Ropa':
+      return [
+        { value: 'Unidades', label: 'Unidades' },
+        { value: 'Paquetes', label: 'Paquetes' },
+        { value: 'Pares', label: 'Pares' },
+        { value: 'Cajas', label: 'Cajas' }
+      ];
+    default:
+      return [
+        { value: 'Unidades', label: 'Unidades' },
+        { value: 'Kilos', label: 'Kilos' },
+        { value: 'Litros', label: 'Litros' },
+        { value: 'Cajas', label: 'Cajas' },
+        { value: 'Paquetes', label: 'Paquetes' }
+      ];
+  }
+};
+
 export default function Inventory({ token, tab }) {
   const { refugioId } = useParams();
   const [activeTab, setActiveTab] = useState(tab || 'stock'); // 'stock', 'deliver', 'history'
@@ -1045,15 +1133,27 @@ export default function Inventory({ token, tab }) {
                 <label className="text-xs font-bold text-on-surface-variant block mb-1">Categoría</label>
                 <select 
                   value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCategory(val);
+                    if (val === 'Alimentos') setUnit('Kilos');
+                    else if (val === 'Medicinas') setUnit('Blisters');
+                    else if (val === 'Articulos de Limpieza') setUnit('Litros');
+                    else setUnit('Unidades');
+                  }}
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-bold"
                 >
                   <option value="Alimentos">Alimentos</option>
                   <option value="Medicinas">Medicinas</option>
-                  <option value="Higiene">Higiene</option>
+                  <option value="Equipos Medicos">Equipos Médicos</option>
+                  <option value="Mobiliario">Mobiliario</option>
+                  <option value="Equipos Tecnologicos">Equipos Tecnológicos</option>
+                  <option value="Articulos de Cocina">Artículos de Cocina</option>
+                  <option value="Aseo Personal">Aseo Personal</option>
+                  <option value="Articulos de Limpieza">Artículos de Limpieza</option>
                   <option value="Camas/Colchones">Camas/Colchones</option>
                   <option value="Ropa">Ropa</option>
-                  <option value="Donación">Donación</option>
+                  <option value="Otros">Otros</option>
                 </select>
               </div>
 
@@ -1064,21 +1164,24 @@ export default function Inventory({ token, tab }) {
                     type="number" 
                     value={quantity} 
                     onChange={(e) => setQuantity(e.target.value)} 
-                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-mono"
                     min="0"
+                    step="0.01"
                     required
                   />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-on-surface-variant block mb-1">Unidad</label>
-                  <input 
-                    type="text" 
+                  <select 
                     value={unit} 
                     onChange={(e) => setUnit(e.target.value)} 
-                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                    placeholder="ej. kg, und"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-bold"
                     required
-                  />
+                  >
+                    {getUnitOptions(category).map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

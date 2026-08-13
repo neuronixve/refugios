@@ -3,7 +3,8 @@ import { useParams } from 'react-router-dom';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
 const MEAL_WINDOWS = [
-  { mealType: 'Desayuno', label: '06:00 AM - 11:00 AM', start: 6 * 60, end: 11 * 60 },
+  { mealType: 'Desayuno', label: '06:00 AM - 09:30 AM', start: 6 * 60, end: 9 * 60 + 30 },
+  { mealType: 'Merienda Mañana', label: '09:30 AM - 10:30 AM', start: 9 * 60 + 30, end: 10 * 60 + 30 },
   { mealType: 'Almuerzo', label: '11:30 AM - 03:00 PM', start: 11 * 60 + 30, end: 15 * 60 },
   { mealType: 'Merienda', label: '03:00 PM - 04:00 PM', start: 15 * 60, end: 16 * 60 },
   { mealType: 'Cena', label: '05:30 PM - 10:00 PM', start: 17 * 60 + 30, end: 22 * 60 }
@@ -35,6 +36,24 @@ export default function LogisticsAttendance({ token }) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedManualResident, setSelectedManualResident] = useState(null);
 
+  // Manual Servings Modal State
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [manualDate, setManualDate] = useState(new Date().toISOString().split('T')[0]);
+  const [manualMealType, setManualMealType] = useState('Desayuno');
+  const [manualQuantities, setManualQuantities] = useState({
+    'Afectados': 0,
+    'Guardia Nacional': 0,
+    'CICPC': 0,
+    'Vigilantes': 0,
+    'Medicos': 0,
+    'Administrativos': 0,
+    'Comite': 0,
+    'Cocineras': 0,
+    'Juventud': 0,
+    'SAREN': 0,
+    'Otros': 0
+  });
+
   // Scanner reference
   const scannerRef = useRef(null);
   const lastScanRef = useRef(0);
@@ -42,6 +61,59 @@ export default function LogisticsAttendance({ token }) {
   const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
     : 'https://api.venezuelarenacera.com/api');
+
+  const handleSaveManualServings = async (e) => {
+    e.preventDefault();
+    setError('');
+    setMessage('');
+    
+    const servingsArray = Object.entries(manualQuantities).map(([person_type, quantity]) => ({
+      meal_type: manualMealType,
+      person_type,
+      quantity: parseInt(quantity) || 0
+    }));
+
+    try {
+      const res = await fetch(`${API_BASE}/refugios/${refugioId}/meals/manual-servings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          serving_date: manualDate,
+          servings: servingsArray
+        })
+      });
+
+      if (res.ok) {
+        setMessage('Raciones manuales guardadas correctamente.');
+        setShowManualModal(false);
+        setManualQuantities({
+          'Afectados': 0,
+          'Guardia Nacional': 0,
+          'CICPC': 0,
+          'Vigilantes': 0,
+          'Medicos': 0,
+          'Administrativos': 0,
+          'Comite': 0,
+          'Cocineras': 0,
+          'Juventud': 0,
+          'SAREN': 0,
+          'Otros': 0
+        });
+      } else {
+        setError('Error al guardar las raciones manuales.');
+      }
+    } catch (err) {
+      console.error(err);
+      setError('Error al conectar con el servidor.');
+    }
+  };
+
+  const handleDownloadReportExcel = () => {
+    window.open(`${API_BASE}/refugios/${refugioId}/meals/manual-servings/download`, '_blank');
+  };
 
   useEffect(() => {
     fetchData();
@@ -238,7 +310,7 @@ export default function LogisticsAttendance({ token }) {
   const registerAttendance = async (docId, personId = null, personType = 'resident') => {
     if (!currentMealWindow) {
       playAlertSound('error');
-      setError('Fuera del horario de servicio. Desayuno 06:00-11:00, Almuerzo 11:30-15:00, Merienda 15:00-16:00, Cena 17:30-22:00.');
+      setError('Fuera del horario de servicio. Desayuno 06:00-09:30, Merienda Mañana 09:30-10:30, Almuerzo 11:30-15:00, Merienda 15:00-16:00, Cena 17:30-22:00.');
       setScanning(false);
       return;
     }
@@ -369,10 +441,28 @@ export default function LogisticsAttendance({ token }) {
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       {/* Header */}
-      <header className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-outline-variant/30 pb-4">
+      <header className="mb-8 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-outline-variant/30 pb-4 print:hidden">
         <div>
           <h2 className="text-2xl font-extrabold text-[#0b2347] uppercase leading-none">Asistencia de Comedor</h2>
           <p className="text-xs text-on-surface-variant mt-1.5 font-mono">Control de entrega de comidas en tiempo real.</p>
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={() => setShowManualModal(true)}
+              className="py-2 px-4 text-white font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-sm hover:opacity-95 transition-all"
+              style={{ backgroundColor: '#0b2347' }}
+            >
+              <span className="material-symbols-outlined text-xs">add_box</span>
+              Registrar Raciones Manuales
+            </button>
+            <button
+              onClick={handleDownloadReportExcel}
+              className="py-2 px-4 text-white font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-sm hover:opacity-95 transition-all"
+              style={{ backgroundColor: '#10b981' }}
+            >
+              <span className="material-symbols-outlined text-xs">download</span>
+              Descargar Reporte Excel
+            </button>
+          </div>
         </div>
 
         {/* Automatic Meal Window */}
@@ -727,6 +817,98 @@ export default function LogisticsAttendance({ token }) {
             >
               Entendido / Reintentar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Servings Registration Modal */}
+      {showManualModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs">
+          <div className="bg-surface rounded-2xl border border-outline-variant p-6 w-full max-w-lg shadow-lg animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-md font-bold text-primary">Registrar Raciones Manuales</h3>
+                <p className="text-[10px] text-on-surface-variant font-bold mt-0.5">Control de comedores - Raciones servidas sin credencial QR</p>
+              </div>
+              <button 
+                onClick={() => setShowManualModal(false)}
+                className="text-on-surface-variant hover:bg-surface-container rounded-full p-2"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveManualServings} className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1 text-xs">
+                  <label className="font-bold text-on-surface-variant">Fecha del Servicio</label>
+                  <input 
+                    type="date"
+                    value={manualDate}
+                    onChange={(e) => setManualDate(e.target.value)}
+                    className="bg-surface-container-low border border-outline-variant rounded-xl p-2.5 font-bold font-mono focus:outline-none"
+                    required
+                  />
+                </div>
+                <div className="flex flex-col gap-1 text-xs">
+                  <label className="font-bold text-on-surface-variant">Tipo de Comida</label>
+                  <select
+                    value={manualMealType}
+                    onChange={(e) => setManualMealType(e.target.value)}
+                    className="bg-surface-container-low border border-outline-variant rounded-xl p-2.5 font-bold focus:outline-none"
+                    required
+                  >
+                    <option value="Desayuno">Desayuno</option>
+                    <option value="Merienda Mañana">Merienda Mañana</option>
+                    <option value="Almuerzo">Almuerzo</option>
+                    <option value="Merienda">Merienda Tarde</option>
+                    <option value="Cena">Cena</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-on-surface-variant block mb-2">Cantidad de platos servidos por categoría:</label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-64 overflow-y-auto pr-1">
+                  {Object.keys(manualQuantities).map((categoryName) => (
+                    <div key={categoryName} className="flex flex-col gap-1 text-xs bg-surface-container-low/40 p-2 rounded-xl border border-outline-variant/30">
+                      <label className="font-bold text-[10px] text-on-surface truncate">{categoryName}</label>
+                      <input 
+                        type="number"
+                        value={manualQuantities[categoryName]}
+                        onChange={(e) => {
+                          const val = Math.max(0, parseInt(e.target.value) || 0);
+                          setManualQuantities({
+                            ...manualQuantities,
+                            [categoryName]: val
+                          });
+                        }}
+                        className="bg-surface-container-low border border-outline-variant rounded-lg p-1.5 text-xs font-mono font-bold"
+                        min="0"
+                        required
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-3 justify-end mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowManualModal(false)}
+                  className="py-2.5 px-4 bg-surface border border-outline text-on-surface hover:bg-surface-container font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="py-2.5 px-5 text-white font-bold rounded-xl text-xs cursor-pointer hover:opacity-95"
+                  style={{ backgroundColor: '#0b2347' }}
+                >
+                  Guardar Raciones
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -8,8 +8,12 @@ export default function Donaciones({ token }) {
   // Donor state
   const [donorName, setDonorName] = useState('');
   const [organization, setOrganization] = useState('');
-  const [email, setEmail] = useState('');
+  const [donorRif, setDonorRif] = useState('');
   const [phone, setPhone] = useState('');
+
+  // Autocomplete donor search
+  const [donorSuggestions, setDonorSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   // Items list state
   const [items, setItems] = useState([
@@ -30,6 +34,31 @@ export default function Donaciones({ token }) {
   const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
     : 'https://api.venezuelarenacera.com/api');
+
+  const searchDonors = async (query) => {
+    if (!query || query.trim().length < 2) {
+      setDonorSuggestions([]);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/donors?search=${encodeURIComponent(query)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setDonorSuggestions(await res.json());
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleSelectDonor = (donor) => {
+    setDonorName(donor.name);
+    setOrganization(donor.organization || '');
+    setDonorRif(donor.rif);
+    setPhone(donor.phone || '');
+    setShowSuggestions(false);
+  };
 
   useEffect(() => {
     fetchRecentDonations();
@@ -86,16 +115,13 @@ export default function Donaciones({ token }) {
     setItems(items.filter((_, idx) => idx !== index));
   };
 
-  // Update item properties
   const handleUpdateItem = (index, field, value) => {
     const updated = [...items];
     updated[index][field] = value;
     if (field === 'category') {
       if (value === 'Alimentos') updated[index].unit = 'Kilos';
       else if (value === 'Medicinas') updated[index].unit = 'Blisters';
-      else if (value === 'Higiene') updated[index].unit = 'Unidades';
-      else if (value === 'Camas/Colchones') updated[index].unit = 'Unidades';
-      else if (value === 'Ropa') updated[index].unit = 'Unidades';
+      else if (value === 'Articulos de Limpieza') updated[index].unit = 'Litros';
       else updated[index].unit = 'Unidades';
     }
     setItems(updated);
@@ -109,6 +135,11 @@ export default function Donaciones({ token }) {
 
     if (!donorName.trim()) {
       setErrorMsg('Por favor ingrese el nombre del donante.');
+      return;
+    }
+
+    if (!donorRif.trim()) {
+      setErrorMsg('Por favor ingrese el RIF del donante.');
       return;
     }
 
@@ -130,7 +161,7 @@ export default function Donaciones({ token }) {
           refugio_id: parseInt(refugioId),
           donor_name: donorName,
           donor_organization: organization,
-          donor_email: email,
+          donor_rif: donorRif,
           donor_phone: phone,
           items: items,
           destination_warehouse: warehouse
@@ -143,8 +174,9 @@ export default function Donaciones({ token }) {
         // Reset form fields
         setDonorName('');
         setOrganization('');
-        setEmail('');
+        setDonorRif('');
         setPhone('');
+        setDonorSuggestions([]);
         setItems([{ name: '', category: 'Medicinas', quantity: 0, unit: 'Cajas', lot: '', expiration: '', refrigeration: false }]);
         if (depositos.length > 0) {
           setWarehouse(depositos[0].name);
@@ -192,7 +224,31 @@ export default function Donaciones({ token }) {
           { value: 'Pomos', label: 'Pomos' },
           { value: 'Unidades', label: 'Unidades' }
         ];
-      case 'Higiene':
+      case 'Equipos Medicos':
+        return [
+          { value: 'Unidades', label: 'Unidades' },
+          { value: 'Cajas', label: 'Cajas' },
+          { value: 'Packs', label: 'Packs' }
+        ];
+      case 'Mobiliario':
+        return [
+          { value: 'Unidades', label: 'Unidades' },
+          { value: 'Cajas', label: 'Cajas' }
+        ];
+      case 'Equipos Tecnologicos':
+        return [
+          { value: 'Unidades', label: 'Unidades' },
+          { value: 'Cajas', label: 'Cajas' },
+          { value: 'Packs', label: 'Packs' }
+        ];
+      case 'Articulos de Cocina':
+        return [
+          { value: 'Unidades', label: 'Unidades' },
+          { value: 'Paquetes', label: 'Paquetes' },
+          { value: 'Cajas', label: 'Cajas' },
+          { value: 'Kilos', label: 'Kilos' }
+        ];
+      case 'Aseo Personal':
         return [
           { value: 'Unidades', label: 'Unidades' },
           { value: 'Paquetes', label: 'Paquetes' },
@@ -200,6 +256,14 @@ export default function Donaciones({ token }) {
           { value: 'Litros', label: 'Litros' },
           { value: 'Galones', label: 'Galones' },
           { value: 'Packs', label: 'Packs' }
+        ];
+      case 'Articulos de Limpieza':
+        return [
+          { value: 'Unidades', label: 'Unidades' },
+          { value: 'Galones', label: 'Galones' },
+          { value: 'Litros', label: 'Litros' },
+          { value: 'Paquetes', label: 'Paquetes' },
+          { value: 'Cajas', label: 'Cajas' }
         ];
       case 'Camas/Colchones':
         return [
@@ -279,36 +343,69 @@ export default function Donaciones({ token }) {
               Información del Donante
             </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col gap-1 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 relative">
+              <div className="flex flex-col gap-1 text-xs relative">
                 <label className="font-bold text-on-surface-variant">Nombre Completo / Contacto *</label>
                 <input 
                   type="text" 
                   value={donorName}
-                  onChange={(e) => setDonorName(e.target.value)}
-                  placeholder="Ej. Roberto Jiménez"
+                  onChange={(e) => {
+                    const val = e.target.value.toUpperCase();
+                    setDonorName(val);
+                    searchDonors(val);
+                    setShowSuggestions(true);
+                  }}
+                  placeholder="Ej. ROBERTO JIMÉNEZ"
                   className="bg-surface-container border border-outline-variant rounded-xl px-3 py-2.5 text-xs focus:outline-none"
+                  required
+                />
+                {showSuggestions && donorSuggestions.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 bg-surface border border-outline-variant rounded-xl shadow-lg z-50 max-h-48 overflow-y-auto mt-1">
+                    <div className="flex justify-between items-center bg-surface-container-low px-2 py-1 border-b border-outline-variant/35 text-[9px] font-bold text-on-surface-variant">
+                      <span>DONANTES REGISTRADOS</span>
+                      <button type="button" onClick={() => setShowSuggestions(false)} className="text-error bg-transparent border-0 cursor-pointer">Cerrar</button>
+                    </div>
+                    {donorSuggestions.map(d => (
+                      <div 
+                        key={d.id}
+                        onClick={() => handleSelectDonor(d)}
+                        className="p-2.5 hover:bg-primary/10 cursor-pointer border-b border-outline-variant/10 text-xs text-on-surface flex justify-between items-center"
+                      >
+                        <div>
+                          <p className="font-black text-on-surface">{d.name}</p>
+                          <p className="text-[10px] text-on-surface-variant">{d.organization || 'Sin Organización'}</p>
+                        </div>
+                        <span className="font-mono text-primary font-bold text-[10px]">{d.rif}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-1 text-xs relative">
+                <label className="font-bold text-on-surface-variant">RIF del Donante *</label>
+                <input 
+                  type="text" 
+                  value={donorRif}
+                  onChange={(e) => {
+                    const val = e.target.value.toUpperCase();
+                    setDonorRif(val);
+                    searchDonors(val);
+                    setShowSuggestions(true);
+                  }}
+                  placeholder="Ej. V123456789 o J312345678"
+                  className="bg-surface-container border border-outline-variant rounded-xl px-3 py-2.5 text-xs focus:outline-none font-mono"
+                  required
                 />
               </div>
 
               <div className="flex flex-col gap-1 text-xs">
-                <label className="font-bold text-on-surface-variant">Organización (Opcional)</label>
+                <label className="font-bold text-on-surface-variant">Organización / Institución (Opcional)</label>
                 <input 
                   type="text" 
                   value={organization}
-                  onChange={(e) => setOrganization(e.target.value)}
-                  placeholder="Ej. Fundación Salud Para Todos"
-                  className="bg-surface-container border border-outline-variant rounded-xl px-3 py-2.5 text-xs focus:outline-none"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1 text-xs">
-                <label className="font-bold text-on-surface-variant">Correo Electrónico</label>
-                <input 
-                  type="email" 
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="contacto@ejemplo.com"
+                  onChange={(e) => setOrganization(e.target.value.toUpperCase())}
+                  placeholder="Ej. FUNDACIÓN SALUD PARA TODOS"
                   className="bg-surface-container border border-outline-variant rounded-xl px-3 py-2.5 text-xs focus:outline-none"
                 />
               </div>
@@ -370,7 +467,12 @@ export default function Donaciones({ token }) {
                       >
                         <option value="Medicinas">Medicinas</option>
                         <option value="Alimentos">Alimentos</option>
-                        <option value="Higiene">Higiene</option>
+                        <option value="Equipos Medicos">Equipos Médicos</option>
+                        <option value="Mobiliario">Mobiliario</option>
+                        <option value="Equipos Tecnologicos">Equipos Tecnológicos</option>
+                        <option value="Articulos de Cocina">Artículos de Cocina</option>
+                        <option value="Aseo Personal">Aseo Personal</option>
+                        <option value="Articulos de Limpieza">Artículos de Limpieza</option>
                         <option value="Camas/Colchones">Camas/Colchones</option>
                         <option value="Ropa">Ropa</option>
                         <option value="Otros">Otros</option>

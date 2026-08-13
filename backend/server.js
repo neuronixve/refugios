@@ -131,10 +131,108 @@ async function initDb() {
     // Convert inventory quantities to Numeric to support decimals
     await runMigration('inventory.quantity numeric', 'ALTER TABLE inventory ALTER COLUMN quantity TYPE NUMERIC(10,2)');
     await runMigration('inventory.min_threshold numeric', 'ALTER TABLE inventory ALTER COLUMN min_threshold TYPE NUMERIC(10,2)');
+
+    // Migraciones para donantes, trazabilidad, consumo de comedor y asistencia manual
+    await runMigration('donors table', `
+      CREATE TABLE IF NOT EXISTS donors (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        organization VARCHAR(255),
+        rif VARCHAR(50) UNIQUE NOT NULL,
+        phone VARCHAR(50),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await runMigration('donations.donor_rif', 'ALTER TABLE donations ADD COLUMN IF NOT EXISTS donor_rif VARCHAR(50)');
+    await runMigration('inventory_movements table', `
+      CREATE TABLE IF NOT EXISTS inventory_movements (
+        id SERIAL PRIMARY KEY,
+        refugio_id INTEGER NOT NULL REFERENCES refugios(id) ON DELETE CASCADE,
+        inventory_id INTEGER,
+        item_name VARCHAR(255) NOT NULL,
+        category VARCHAR(255) NOT NULL,
+        deposito_id INTEGER,
+        deposito_name VARCHAR(255),
+        inventory_type VARCHAR(50) NOT NULL,
+        movement_type VARCHAR(50) NOT NULL,
+        quantity NUMERIC(10, 2) NOT NULL,
+        unit VARCHAR(50) NOT NULL,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        user_name VARCHAR(255),
+        reference_id INTEGER,
+        details TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await runMigration('menus.menu_date', 'ALTER TABLE menus ADD COLUMN IF NOT EXISTS menu_date DATE');
+    await runMigration('menus.is_consumed', 'ALTER TABLE menus ADD COLUMN IF NOT EXISTS is_consumed BOOLEAN DEFAULT FALSE');
+    await runMigration('manual_meals_servings table', `
+      CREATE TABLE IF NOT EXISTS manual_meals_servings (
+        id SERIAL PRIMARY KEY,
+        refugio_id INTEGER NOT NULL REFERENCES refugios(id) ON DELETE CASCADE,
+        serving_date DATE NOT NULL,
+        meal_type VARCHAR(50) NOT NULL,
+        person_type VARCHAR(50) NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 0,
+        registered_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT unique_serving_per_day_type UNIQUE(refugio_id, serving_date, meal_type, person_type)
+      )
+    `);
     
     console.log('Migraciones dinámicas verificadas y aplicadas.');
   } catch (err) {
     console.error('Error al inicializar el esquema de base de datos:', err);
+  }
+}
+
+// Helper para registrar trazabilidad de movimientos de inventario
+async function logInventoryMovement(db, {
+  refugio_id,
+  inventory_id,
+  item_name,
+  category,
+  deposito_id,
+  deposito_name,
+  inventory_type,
+  movement_type,
+  quantity,
+  unit,
+  user_id,
+  user_name,
+  reference_id,
+  details
+}) {
+  try {
+    let resolvedDepName = deposito_name;
+    if (deposito_id && !resolvedDepName) {
+      const depRes = await db.query('SELECT name FROM depositos WHERE id = $1', [deposito_id]);
+      if (depRes.rows.length > 0) {
+        resolvedDepName = depRes.rows[0].name;
+      }
+    }
+    await db.query(
+      `INSERT INTO inventory_movements (refugio_id, inventory_id, item_name, category, deposito_id, deposito_name, inventory_type, movement_type, quantity, unit, user_id, user_name, reference_id, details)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      [
+        parseInt(refugio_id),
+        inventory_id ? parseInt(inventory_id) : null,
+        item_name,
+        category,
+        deposito_id ? parseInt(deposito_id) : null,
+        resolvedDepName || null,
+        inventory_type,
+        movement_type,
+        parseFloat(quantity) || 0,
+        unit || 'Unidades',
+        user_id ? parseInt(user_id) : null,
+        user_name || 'Sistema',
+        reference_id ? parseInt(reference_id) : null,
+        details || null
+      ]
+    );
+  } catch (err) {
+    console.error('Error al registrar movimiento de inventario en trazabilidad:', err);
   }
 }
 
@@ -1669,8 +1767,14 @@ app.post('/api/refugios/:refugio_id/health-inventory', authenticateToken, requir
     const minVal = parseFloat(min_threshold) || 0;
     const status = qtyVal === 0 ? 'Sin Stock' : (qtyVal <= minVal ? 'Stock Crítico' : 'Stock Suficiente');
     let result;
+    let oldQty = 0;
 
     if (id) {
+      const oldRes = await db.query('SELECT quantity FROM inventory WHERE id = $1', [id]);
+      if (oldRes.rows.length > 0) {
+        oldQty = parseFloat(oldRes.rows[0].quantity) || 0;
+      }
+
       result = await db.query(
         `UPDATE inventory
          SET item_name = $1, category = $2, quantity = $3, min_threshold = $4,
@@ -1683,6 +1787,25 @@ app.post('/api/refugios/:refugio_id/health-inventory', authenticateToken, requir
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'El insumo no pertenece al inventario de salud de esta sede.' });
       }
+
+      const diff = qtyVal - oldQty;
+      if (diff !== 0) {
+        await logInventoryMovement(db, {
+          refugio_id,
+          inventory_id: id,
+          item_name,
+          category: category || 'Medicinas',
+          deposito_id: deposito.id,
+          deposito_name: deposito.name,
+          inventory_type: 'salud',
+          movement_type: 'ajuste_manual',
+          quantity: diff,
+          unit: unit || 'Unidades',
+          user_id: req.user?.id,
+          user_name: req.user?.name,
+          details: `Ajuste manual del stock de salud. Cantidad anterior: ${oldQty}, Nueva cantidad: ${qtyVal}.`
+        });
+      }
     } else {
       result = await db.query(
         `INSERT INTO inventory
@@ -1692,6 +1815,22 @@ app.post('/api/refugios/:refugio_id/health-inventory', authenticateToken, requir
         [parseInt(refugio_id), item_name, category || 'Medicinas', qtyVal, minVal,
           unit || 'Unidades', status, deposito.id, units_per_package || 1, sub_unit || null]
       );
+      const newId = result.rows[0].id;
+      await logInventoryMovement(db, {
+        refugio_id,
+        inventory_id: newId,
+        item_name,
+        category: category || 'Medicinas',
+        deposito_id: deposito.id,
+        deposito_name: deposito.name,
+        inventory_type: 'salud',
+        movement_type: 'ajuste_manual',
+        quantity: qtyVal,
+        unit: unit || 'Unidades',
+        user_id: req.user?.id,
+        user_name: req.user?.name,
+        details: `Registro inicial de insumo en salud.`
+      });
     }
 
     res.status(id ? 200 : 201).json({ ...result.rows[0], deposito_name: deposito.name });
@@ -1704,11 +1843,33 @@ app.post('/api/refugios/:refugio_id/health-inventory', authenticateToken, requir
 app.delete('/api/refugios/:refugio_id/health-inventory/:id', authenticateToken, requireMedicalInventoryWriter, async (req, res) => {
   try {
     const deposito = await getOrCreateHealthDeposito(db, req.params.refugio_id);
+    const oldRes = await db.query('SELECT item_name, category, quantity, unit FROM inventory WHERE id = $1', [req.params.id]);
+    
     const result = await db.query(
       `DELETE FROM inventory WHERE id = $1 AND refugio_id = $2 AND deposito_id = $3 RETURNING id, item_name`,
       [parseInt(req.params.id), parseInt(req.params.refugio_id), deposito.id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Insumo médico no encontrado en esta sede.' });
+
+    if (oldRes.rows.length > 0) {
+      const item = oldRes.rows[0];
+      await logInventoryMovement(db, {
+        refugio_id: req.params.refugio_id,
+        inventory_id: req.params.id,
+        item_name: item.item_name,
+        category: item.category,
+        deposito_id: deposito.id,
+        deposito_name: deposito.name,
+        inventory_type: 'salud',
+        movement_type: 'eliminacion',
+        quantity: -parseFloat(item.quantity),
+        unit: item.unit,
+        user_id: req.user?.id,
+        user_name: req.user?.name,
+        details: `Eliminación permanente del insumo médico del inventario. Stock al momento de eliminar: ${item.quantity}.`
+      });
+    }
+
     res.json({ message: `El insumo médico ${result.rows[0].item_name} fue eliminado.` });
   } catch (err) {
     console.error('Error al eliminar insumo de salud:', err);
@@ -1944,7 +2105,14 @@ app.post('/api/refugios/:refugio_id/inventory', authenticateToken, denyMedicalGe
     const status = qtyVal === 0 ? 'Sin Stock' : (qtyVal <= minVal ? 'Stock Crítico' : 'Stock Suficiente');
     
     let result;
+    let oldQty = 0;
+
     if (id) {
+      const oldRes = await db.query('SELECT quantity FROM inventory WHERE id = $1', [id]);
+      if (oldRes.rows.length > 0) {
+        oldQty = parseFloat(oldRes.rows[0].quantity) || 0;
+      }
+
       result = await db.query(
         `INSERT INTO inventory (id, refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id, units_per_package, sub_unit)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -1955,6 +2123,25 @@ app.post('/api/refugios/:refugio_id/inventory', authenticateToken, denyMedicalGe
          RETURNING *`,
         [parseInt(id), parseInt(refugio_id), item_name, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null, units_per_package || 1, sub_unit || null]
       );
+
+      const diff = qtyVal - oldQty;
+      if (diff !== 0) {
+        const inventory_type = category === 'Alimentos' ? 'cocina' : (category === 'Medicinas' ? 'salud' : 'almacen');
+        await logInventoryMovement(db, {
+          refugio_id,
+          inventory_id: id,
+          item_name,
+          category,
+          deposito_id,
+          inventory_type,
+          movement_type: 'ajuste_manual',
+          quantity: diff,
+          unit: unit || 'unidades',
+          user_id: req.user?.id,
+          user_name: req.user?.name,
+          details: `Ajuste manual de inventario. Cantidad anterior: ${oldQty}, Nueva cantidad: ${qtyVal}.`
+        });
+      }
     } else {
       result = await db.query(
         `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id, units_per_package, sub_unit)
@@ -1962,6 +2149,22 @@ app.post('/api/refugios/:refugio_id/inventory', authenticateToken, denyMedicalGe
          RETURNING *`,
         [parseInt(refugio_id), item_name, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null, units_per_package || 1, sub_unit || null]
       );
+      const newId = result.rows[0].id;
+      const inventory_type = category === 'Alimentos' ? 'cocina' : (category === 'Medicinas' ? 'salud' : 'almacen');
+      await logInventoryMovement(db, {
+        refugio_id,
+        inventory_id: newId,
+        item_name,
+        category,
+        deposito_id,
+        inventory_type,
+        movement_type: 'ajuste_manual',
+        quantity: qtyVal,
+        unit: unit || 'unidades',
+        user_id: req.user?.id,
+        user_name: req.user?.name,
+        details: `Registro inicial de insumo en inventario.`
+      });
     }
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1972,11 +2175,33 @@ app.post('/api/refugios/:refugio_id/inventory', authenticateToken, denyMedicalGe
 
 app.delete('/api/refugios/:refugio_id/inventory/:id', authenticateToken, denyMedicalGeneralInventoryWrite, async (req, res) => {
   try {
+    const oldRes = await db.query('SELECT item_name, category, quantity, unit, deposito_id FROM inventory WHERE id = $1', [req.params.id]);
+    
     const result = await db.query(
       `DELETE FROM inventory WHERE id = $1 AND refugio_id = $2 RETURNING id, item_name`,
       [parseInt(req.params.id), parseInt(req.params.refugio_id)]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Insumo no encontrado.' });
+
+    if (oldRes.rows.length > 0) {
+      const item = oldRes.rows[0];
+      const inventory_type = item.category === 'Alimentos' ? 'cocina' : (item.category === 'Medicinas' ? 'salud' : 'almacen');
+      await logInventoryMovement(db, {
+        refugio_id: req.params.refugio_id,
+        inventory_id: req.params.id,
+        item_name: item.item_name,
+        category: item.category,
+        deposito_id: item.deposito_id,
+        inventory_type,
+        movement_type: 'eliminacion',
+        quantity: -parseFloat(item.quantity),
+        unit: item.unit,
+        user_id: req.user?.id,
+        user_name: req.user?.name,
+        details: `Eliminación permanente del insumo de inventario. Stock al momento de eliminar: ${item.quantity}.`
+      });
+    }
+
     res.json({ message: `El insumo ${result.rows[0].item_name} fue eliminado.` });
   } catch (err) {
     console.error('Error al eliminar insumo:', err);
@@ -1988,16 +2213,39 @@ app.put('/api/inventory/:id', authenticateToken, denyMedicalGeneralInventoryWrit
   const { id } = req.params;
   const { quantity } = req.body;
   try {
-    const itemRes = await db.query('SELECT min_threshold FROM inventory WHERE id = $1', [id]);
+    const itemRes = await db.query('SELECT item_name, category, quantity, min_threshold, unit, deposito_id, refugio_id FROM inventory WHERE id = $1', [id]);
     if (itemRes.rows.length === 0) return res.status(404).json({ error: 'Insumo no encontrado.' });
     
-    const min_threshold = itemRes.rows[0].min_threshold;
-    const status = quantity === 0 ? 'Sin Stock' : (quantity <= min_threshold ? 'Stock Crítico' : 'Stock Suficiente');
+    const item = itemRes.rows[0];
+    const oldQty = parseFloat(item.quantity) || 0;
+    const qtyVal = parseFloat(quantity) || 0;
+    const min_threshold = item.min_threshold;
+    const status = qtyVal === 0 ? 'Sin Stock' : (qtyVal <= min_threshold ? 'Stock Crítico' : 'Stock Suficiente');
     
     const result = await db.query(
       'UPDATE inventory SET quantity = $1, status = $2, updated_at = NOW() WHERE id = $3 RETURNING *',
-      [quantity, status, id]
+      [qtyVal, status, id]
     );
+
+    const diff = qtyVal - oldQty;
+    if (diff !== 0) {
+      const inventory_type = item.category === 'Alimentos' ? 'cocina' : (item.category === 'Medicinas' ? 'salud' : 'almacen');
+      await logInventoryMovement(db, {
+        refugio_id: item.refugio_id,
+        inventory_id: id,
+        item_name: item.item_name,
+        category: item.category,
+        deposito_id: item.deposito_id,
+        inventory_type,
+        movement_type: 'ajuste_manual',
+        quantity: diff,
+        unit: item.unit,
+        user_id: req.user?.id,
+        user_name: req.user?.name,
+        details: `Ajuste directo de stock. Cantidad anterior: ${oldQty}, Nueva cantidad: ${qtyVal}.`
+      });
+    }
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -2251,6 +2499,23 @@ app.post('/api/refugios/:refugio_id/medication-deliveries', authenticateToken, r
       [qtyToDiscount, parseInt(inventory_item_id)]
     );
 
+    const resident = residentRes.rows[0];
+    await logInventoryMovement(client, {
+      refugio_id,
+      inventory_id: inventory_item_id,
+      item_name: item.item_name,
+      category: 'Medicinas',
+      deposito_id: null,
+      inventory_type: 'salud',
+      movement_type: 'entrega_medicina',
+      quantity: -qtyToDiscount,
+      unit: item.unit,
+      user_id: req.user.id,
+      user_name: req.user.name,
+      reference_id: result.rows[0].id,
+      details: `Entrega de medicamento a ${resident.first_name} ${resident.last_name}.`
+    });
+
     await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -2276,16 +2541,40 @@ app.get('/api/refugios/:refugio_id/menus', authenticateToken, async (req, res) =
 
 app.post('/api/refugios/:refugio_id/menus', authenticateToken, async (req, res) => {
   const { refugio_id } = req.params;
-  const { day_of_week, meal_type, description, ingredients, diets_json } = req.body;
+  const { day_of_week, meal_type, description, ingredients, diets_json, menu_date } = req.body;
   try {
-    const result = await db.query(
-      `INSERT INTO menus (refugio_id, day_of_week, meal_type, description, ingredients, diets_json)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (refugio_id, day_of_week, meal_type) DO UPDATE 
-       SET description = EXCLUDED.description, ingredients = EXCLUDED.ingredients, diets_json = EXCLUDED.diets_json
-       RETURNING *`,
-      [refugio_id, day_of_week, meal_type, description, ingredients, diets_json || '{}']
-    );
+    const cleanDate = menu_date || null;
+    let result;
+    
+    if (cleanDate) {
+      const check = await db.query(
+        'SELECT id FROM menus WHERE refugio_id = $1 AND menu_date = $2 AND meal_type = $3',
+        [refugio_id, cleanDate, meal_type]
+      );
+      if (check.rows.length > 0) {
+        result = await db.query(
+          `UPDATE menus 
+           SET description = $1, ingredients = $2, diets_json = $3, day_of_week = $4, is_consumed = FALSE
+           WHERE id = $5 RETURNING *`,
+          [description, ingredients, diets_json || '{}', day_of_week, check.rows[0].id]
+        );
+      } else {
+        result = await db.query(
+          `INSERT INTO menus (refugio_id, day_of_week, meal_type, description, ingredients, diets_json, menu_date)
+           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+          [refugio_id, day_of_week, meal_type, description, ingredients, diets_json || '{}', cleanDate]
+        );
+      }
+    } else {
+      result = await db.query(
+        `INSERT INTO menus (refugio_id, day_of_week, meal_type, description, ingredients, diets_json)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (refugio_id, day_of_week, meal_type) DO UPDATE 
+         SET description = EXCLUDED.description, ingredients = EXCLUDED.ingredients, diets_json = EXCLUDED.diets_json
+         RETURNING *`,
+        [refugio_id, day_of_week, meal_type, description, ingredients, diets_json || '{}']
+      );
+    }
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -2295,16 +2584,615 @@ app.post('/api/refugios/:refugio_id/menus', authenticateToken, async (req, res) 
 
 app.delete('/api/refugios/:refugio_id/menus', authenticateToken, async (req, res) => {
   const { refugio_id } = req.params;
-  const { day_of_week, meal_type } = req.query;
+  const { day_of_week, meal_type, menu_date } = req.query;
   try {
-    await db.query(
-      'DELETE FROM menus WHERE refugio_id = $1 AND day_of_week = $2 AND meal_type = $3',
-      [parseInt(refugio_id), day_of_week, meal_type]
-    );
+    if (menu_date) {
+      await db.query(
+        'DELETE FROM menus WHERE refugio_id = $1 AND menu_date = $2 AND meal_type = $3',
+        [parseInt(refugio_id), menu_date, meal_type]
+      );
+    } else {
+      await db.query(
+        'DELETE FROM menus WHERE refugio_id = $1 AND day_of_week = $2 AND meal_type = $3',
+        [parseInt(refugio_id), day_of_week, meal_type]
+      );
+    }
     res.json({ message: 'Menú eliminado correctamente.' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al eliminar menú.' });
+  }
+});
+
+app.post('/api/refugios/:refugio_id/menus/consume', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  const { scope, day_of_week, menu_date, menu_dates, ingredients } = req.body;
+
+  if (!ingredients || !Array.isArray(ingredients) || ingredients.length === 0) {
+    return res.status(400).json({ error: 'La lista de ingredientes a descontar es requerida.' });
+  }
+
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Resolve kitchen depósito
+    const depRes = await client.query(
+      "SELECT id, name FROM depositos WHERE refugio_id = $1 AND name ILIKE '%cocina%' LIMIT 1",
+      [parseInt(refugio_id)]
+    );
+    if (depRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No se encontró el depósito de cocina asignado a esta sede.' });
+    }
+    const kitchenDep = depRes.rows[0];
+
+    // 2. Iterate and discount each ingredient
+    for (const ing of ingredients) {
+      const ingName = ing.name.trim();
+      const ingQty = parseFloat(ing.quantity) || 0;
+      const ingUnit = ing.unit || 'Unidades';
+
+      if (ingQty <= 0) continue;
+
+      // Find in kitchen inventory (case-insensitive name match)
+      const checkItem = await client.query(
+        `SELECT id, quantity, min_threshold FROM inventory 
+         WHERE refugio_id = $1 AND LOWER(item_name) = LOWER($2) AND category = 'Alimentos' AND deposito_id = $3`,
+        [parseInt(refugio_id), ingName.toLowerCase(), kitchenDep.id]
+      );
+
+      if (checkItem.rows.length > 0) {
+        const item = checkItem.rows[0];
+        const newQty = Math.max(0, parseFloat(item.quantity) - ingQty);
+        const minVal = parseFloat(item.min_threshold) || 5;
+        let status = 'Stock Suficiente';
+        if (newQty <= 0) status = 'Sin Stock';
+        else if (newQty < minVal) status = 'Stock Crítico';
+
+        await client.query(
+          'UPDATE inventory SET quantity = $1, status = $2, updated_at = NOW() WHERE id = $3',
+          [newQty, status, item.id]
+        );
+
+        // Log movement
+        await logInventoryMovement(client, {
+          refugio_id,
+          inventory_id: item.id,
+          item_name: ingName,
+          category: 'Alimentos',
+          deposito_id: kitchenDep.id,
+          deposito_name: kitchenDep.name,
+          inventory_type: 'cocina',
+          movement_type: 'consumo_menu',
+          quantity: -ingQty,
+          unit: ingUnit,
+          user_id: req.user?.id,
+          user_name: req.user?.name,
+          details: `Consumo descontado del menú ${scope === 'week' ? 'semanal' : day_of_week} (${menu_date || 'Rango semanal'}).`
+        });
+      } else {
+        // If it doesn't exist, register with negative balance (deficit)
+        const newQty = -ingQty;
+        const status = 'Sin Stock';
+        const insertRes = await client.query(
+          `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id)
+           VALUES ($1, $2, 'Alimentos', $3, 5, $4, $5, $6) RETURNING id`,
+          [parseInt(refugio_id), ingName, newQty, ingUnit, status, kitchenDep.id]
+        );
+        const newId = insertRes.rows[0].id;
+
+        // Log movement
+        await logInventoryMovement(client, {
+          refugio_id,
+          inventory_id: newId,
+          item_name: ingName,
+          category: 'Alimentos',
+          deposito_id: kitchenDep.id,
+          deposito_name: kitchenDep.name,
+          inventory_type: 'cocina',
+          movement_type: 'consumo_menu',
+          quantity: -ingQty,
+          unit: ingUnit,
+          user_id: req.user?.id,
+          user_name: req.user?.name,
+          details: `Consumo descontado (en déficit) del menú ${scope === 'week' ? 'semanal' : day_of_week} (${menu_date || 'Rango semanal'}).`
+        });
+      }
+    }
+
+    // 3. Mark menus as consumed/discounted
+    if (scope === 'week') {
+      if (menu_dates && Array.isArray(menu_dates) && menu_dates.length > 0) {
+        await client.query(
+          'UPDATE menus SET is_consumed = TRUE WHERE refugio_id = $1 AND menu_date = ANY($2::date[])',
+          [parseInt(refugio_id), menu_dates]
+        );
+      } else {
+        await client.query(
+          'UPDATE menus SET is_consumed = TRUE WHERE refugio_id = $1',
+          [parseInt(refugio_id)]
+        );
+      }
+    } else {
+      if (menu_date) {
+        await client.query(
+          'UPDATE menus SET is_consumed = TRUE WHERE refugio_id = $1 AND menu_date = $2',
+          [parseInt(refugio_id), menu_date]
+        );
+      } else {
+        await client.query(
+          'UPDATE menus SET is_consumed = TRUE WHERE refugio_id = $1 AND day_of_week = $2',
+          [parseInt(refugio_id), day_of_week]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ message: 'El consumo del menú fue registrado y los insumos fueron descontados del inventario de cocina.' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error al descontar consumo de menú:', err);
+    res.status(500).json({ error: 'Error al registrar consumo del menú.' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/refugios/:refugio_id/meals/manual-servings', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  const { start_date, end_date } = req.query;
+  try {
+    let queryStr = 'SELECT * FROM manual_meals_servings WHERE refugio_id = $1';
+    let params = [parseInt(refugio_id)];
+    if (start_date) {
+      params.push(start_date);
+      queryStr += ` AND serving_date >= $${params.length}`;
+    }
+    if (end_date) {
+      params.push(end_date);
+      queryStr += ` AND serving_date <= $${params.length}`;
+    }
+    queryStr += ' ORDER BY serving_date DESC, meal_type ASC';
+    const result = await db.query(queryStr, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener raciones manuales de comida.' });
+  }
+});
+
+app.post('/api/refugios/:refugio_id/meals/manual-servings', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  const { serving_date, servings } = req.body;
+
+  if (!serving_date || !servings || !Array.isArray(servings)) {
+    return res.status(400).json({ error: 'Fecha y lista de raciones son requeridas.' });
+  }
+
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+    for (const s of servings) {
+      const { meal_type, person_type, quantity } = s;
+      const qty = parseInt(quantity) || 0;
+      await client.query(
+        `INSERT INTO manual_meals_servings (refugio_id, serving_date, meal_type, person_type, quantity, registered_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (refugio_id, serving_date, meal_type, person_type) DO UPDATE
+         SET quantity = EXCLUDED.quantity, registered_by = EXCLUDED.registered_by`,
+        [parseInt(refugio_id), serving_date, meal_type, person_type, qty, req.user?.id]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ message: 'Raciones manuales registradas correctamente.' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: 'Error al guardar raciones manuales.' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/refugios/:refugio_id/inventory/movements', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  const { start_date, end_date, deposito_id, inventory_type, movement_type } = req.query;
+
+  try {
+    let queryStr = 'SELECT * FROM inventory_movements WHERE refugio_id = $1';
+    let params = [parseInt(refugio_id)];
+
+    if (start_date) {
+      params.push(start_date);
+      queryStr += ` AND created_at >= $${params.length}`;
+    }
+    if (end_date) {
+      params.push(end_date + ' 23:59:59');
+      queryStr += ` AND created_at <= $${params.length}`;
+    }
+    if (deposito_id) {
+      params.push(parseInt(deposito_id));
+      queryStr += ` AND deposito_id = $${params.length}`;
+    }
+    if (inventory_type) {
+      params.push(inventory_type);
+      queryStr += ` AND inventory_type = $${params.length}`;
+    }
+    if (movement_type) {
+      params.push(movement_type);
+      queryStr += ` AND movement_type = $${params.length}`;
+    }
+
+    queryStr += ' ORDER BY created_at DESC';
+    const result = await db.query(queryStr, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener trazabilidad de inventario.' });
+  }
+});
+
+app.get('/api/refugios/:refugio_id/inventory/movements/download', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  const { start_date, end_date, deposito_id, inventory_type, movement_type } = req.query;
+
+  try {
+    const refugioRes = await db.query('SELECT name FROM refugios WHERE id = $1', [refugio_id]);
+    const refugioName = refugioRes.rows.length > 0 ? refugioRes.rows[0].name : 'Sede';
+
+    let queryStr = 'SELECT * FROM inventory_movements WHERE refugio_id = $1';
+    let params = [parseInt(refugio_id)];
+
+    if (start_date) {
+      params.push(start_date);
+      queryStr += ` AND created_at >= $${params.length}`;
+    }
+    if (end_date) {
+      params.push(end_date + ' 23:59:59');
+      queryStr += ` AND created_at <= $${params.length}`;
+    }
+    if (deposito_id) {
+      params.push(parseInt(deposito_id));
+      queryStr += ` AND deposito_id = $${params.length}`;
+    }
+    if (inventory_type) {
+      params.push(inventory_type);
+      queryStr += ` AND inventory_type = $${params.length}`;
+    }
+    if (movement_type) {
+      params.push(movement_type);
+      queryStr += ` AND movement_type = $${params.length}`;
+    }
+
+    queryStr += ' ORDER BY created_at DESC';
+    const result = await db.query(queryStr, params);
+    const movements = result.rows;
+
+    const ExcelJS = require('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Trazabilidad');
+
+    worksheet.mergeCells('A1:J1');
+    const titleCell = worksheet.getCell('A1');
+    titleCell.value = `REPORTE DE TRAZABILIDAD - INVENTARIOS - ${refugioName.toUpperCase()}`;
+    titleCell.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B2347' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getRow(1).height = 45;
+
+    const path = require('path');
+    const fs = require('fs');
+    const sarenLogoPath = path.join(__dirname, '../frontend/public/logo-saren.png');
+    const campamentoLogoPath = path.join(__dirname, '../frontend/public/campamento-logo-transparente.png');
+
+    if (fs.existsSync(campamentoLogoPath)) {
+      try {
+        const imageId = workbook.addImage({
+          filename: campamentoLogoPath,
+          extension: 'png',
+        });
+        worksheet.addImage(imageId, {
+          tl: { col: 0.1, row: 0.15 },
+          ext: { width: 42, height: 35 }
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    if (fs.existsSync(sarenLogoPath)) {
+      try {
+        const imageId = workbook.addImage({
+          filename: sarenLogoPath,
+          extension: 'png',
+        });
+        worksheet.addImage(imageId, {
+          tl: { col: 9.2, row: 0.15 },
+          ext: { width: 80, height: 35 }
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    worksheet.addRow([]);
+
+    const headers = [
+      'Fecha / Hora',
+      'Inventario',
+      'Tipo de Movimiento',
+      'Artículo / Insumo',
+      'Categoría',
+      'Depósito / Ubicación',
+      'Cantidad',
+      'Unidad',
+      'Responsable',
+      'Detalles'
+    ];
+    worksheet.addRow(headers);
+    const headerRow = worksheet.getRow(3);
+    headerRow.height = 25;
+    headerRow.eachCell(function(cell) {
+      cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+      };
+    });
+
+    movements.forEach(m => {
+      let invLabel = 'Almacén';
+      if (m.inventory_type === 'salud') invLabel = 'Servicio Médico';
+      else if (m.inventory_type === 'cocina') invLabel = 'Cocina / Comedor';
+
+      let typeLabel = m.movement_type;
+      if (m.movement_type === 'ingreso_donacion') typeLabel = 'Donación';
+      else if (m.movement_type === 'ajuste_manual') typeLabel = 'Ajuste de Stock';
+      else if (m.movement_type === 'consumo_menu') typeLabel = 'Consumo Comedor';
+      else if (m.movement_type === 'entrega_medicina') typeLabel = 'Entrega Medicina';
+      else if (m.movement_type === 'entrega_insumo') typeLabel = 'Entrega Insumo';
+      else if (m.movement_type === 'eliminacion') typeLabel = 'Eliminación';
+
+      worksheet.addRow([
+        new Date(m.created_at).toLocaleString('es-VE'),
+        invLabel,
+        typeLabel.toUpperCase(),
+        m.item_name,
+        m.category,
+        m.deposito_name || 'Almacén Central',
+        parseFloat(m.quantity),
+        m.unit,
+        m.user_name || 'Sistema',
+        m.details || ''
+      ]);
+    });
+
+    worksheet.columns.forEach(column => {
+      let maxLen = 0;
+      column.eachCell({ includeEmpty: true }, cell => {
+        const valStr = cell.value ? String(cell.value) : '';
+        if (valStr.length > maxLen) maxLen = valStr.length;
+      });
+      column.width = Math.max(12, maxLen + 2);
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=Reporte_Trazabilidad_${refugio_id}.xlsx`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al generar Excel de trazabilidad.' });
+  }
+});
+
+app.get('/api/refugios/:refugio_id/meals/manual-servings/download', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  const { start_date, end_date } = req.query;
+
+  try {
+    const refugioRes = await db.query('SELECT name FROM refugios WHERE id = $1', [refugio_id]);
+    const refugioName = refugioRes.rows.length > 0 ? refugioRes.rows[0].name : 'Sede';
+
+    const manualRes = await db.query(
+      `SELECT serving_date::date as date, meal_type, person_type, SUM(quantity)::int as quantity 
+       FROM manual_meals_servings 
+       WHERE refugio_id = $1 AND ($2::date IS NULL OR serving_date >= $2) AND ($3::date IS NULL OR serving_date <= $3)
+       GROUP BY serving_date, meal_type, person_type`,
+      [parseInt(refugio_id), start_date || null, end_date || null]
+    );
+
+    const scannedRes = await db.query(
+      `SELECT meal_date::date as date, meal_type, 'Afectados' as person_type, COUNT(*)::int as quantity
+       FROM meal_attendance
+       WHERE refugio_id = $1 AND resident_id IS NOT NULL AND ($2::date IS NULL OR meal_date >= $2) AND ($3::date IS NULL OR meal_date <= $3)
+       GROUP BY meal_date, meal_type`,
+      [parseInt(refugio_id), start_date || null, end_date || null]
+    );
+
+    const scannedStaff = await db.query(
+      `SELECT ma.meal_date::date as date, ma.meal_type, 
+              CASE 
+                WHEN u.role = 'medico' THEN 'Medicos'
+                WHEN u.role = 'cocina' THEN 'Cocineras'
+                WHEN u.role = 'seguridad' THEN 'Vigilantes'
+                ELSE 'Administrativos'
+              END as person_type, 
+              COUNT(*)::int as quantity
+       FROM meal_attendance ma
+       JOIN users u ON ma.staff_id = u.id
+       WHERE ma.refugio_id = $1 AND ma.staff_id IS NOT NULL AND ($2::date IS NULL OR ma.meal_date >= $2) AND ($3::date IS NULL OR ma.meal_date <= $3)
+       GROUP BY ma.meal_date, ma.meal_type, u.role`,
+      [parseInt(refugio_id), start_date || null, end_date || null]
+    );
+
+    const data = {};
+    const addRow = (dateStr, mealType, personType, quantity) => {
+      const key = `${dateStr}_${mealType}`;
+      if (!data[key]) {
+        data[key] = {
+          date: dateStr,
+          meal_type: mealType,
+          'Afectados': 0,
+          'Guardia Nacional': 0,
+          'CICPC': 0,
+          'Vigilantes': 0,
+          'Medicos': 0,
+          'Administrativos': 0,
+          'Comite': 0,
+          'Cocineras': 0,
+          'Juventud': 0,
+          'SAREN': 0,
+          'Otros': 0
+        };
+      }
+      data[key][personType] = (data[key][personType] || 0) + quantity;
+    };
+
+    manualRes.rows.forEach(r => addRow(new Date(r.date).toISOString().split('T')[0], r.meal_type, r.person_type, r.quantity));
+    scannedRes.rows.forEach(r => addRow(new Date(r.date).toISOString().split('T')[0], r.meal_type, r.person_type, r.quantity));
+    scannedStaff.rows.forEach(r => addRow(new Date(r.date).toISOString().split('T')[0], r.meal_type, r.person_type, r.quantity));
+
+    const rows = Object.values(data).sort((a, b) => {
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
+      return a.meal_type.localeCompare(b.meal_type);
+    });
+
+    const ExcelJS = require('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Raciones Servidas');
+
+    worksheet.mergeCells('A1:N1');
+    const titleCell = worksheet.getCell('A1');
+    titleCell.value = `REPORTE CONSOLIDADO DE COMIDAS REPARTIDAS - ${refugioName.toUpperCase()}`;
+    titleCell.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B2347' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getRow(1).height = 45;
+
+    const path = require('path');
+    const fs = require('fs');
+    const sarenLogoPath = path.join(__dirname, '../frontend/public/logo-saren.png');
+    const campamentoLogoPath = path.join(__dirname, '../frontend/public/campamento-logo-transparente.png');
+
+    if (fs.existsSync(campamentoLogoPath)) {
+      try {
+        const imageId = workbook.addImage({
+          filename: campamentoLogoPath,
+          extension: 'png',
+        });
+        worksheet.addImage(imageId, {
+          tl: { col: 0.1, row: 0.15 },
+          ext: { width: 42, height: 35 }
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    if (fs.existsSync(sarenLogoPath)) {
+      try {
+        const imageId = workbook.addImage({
+          filename: sarenLogoPath,
+          extension: 'png',
+        });
+        worksheet.addImage(imageId, {
+          tl: { col: 13.2, row: 0.15 },
+          ext: { width: 80, height: 35 }
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    worksheet.addRow([]);
+
+    const headers = [
+      'Fecha',
+      'Servicio de Comida',
+      'Afectados',
+      'Guardia Nacional',
+      'CICPC',
+      'Vigilantes',
+      'Médicos',
+      'Administrativos',
+      'Comité',
+      'Cocineras',
+      'Juventud',
+      'SAREN',
+      'Otros',
+      'Total Raciones'
+    ];
+    worksheet.addRow(headers);
+    const headerRow = worksheet.getRow(3);
+    headerRow.height = 25;
+    headerRow.eachCell(function(cell) {
+      cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+      };
+    });
+
+    rows.forEach(r => {
+      const total = 
+        r['Afectados'] +
+        r['Guardia Nacional'] +
+        r['CICPC'] +
+        r['Vigilantes'] +
+        r['Medicos'] +
+        r['Administrativos'] +
+        r['Comite'] +
+        r['Cocineras'] +
+        r['Juventud'] +
+        r['SAREN'] +
+        r['Otros'];
+
+      worksheet.addRow([
+        r.date,
+        r.meal_type,
+        r['Afectados'],
+        r['Guardia Nacional'],
+        r['CICPC'],
+        r['Vigilantes'],
+        r['Medicos'],
+        r['Administrativos'],
+        r['Comite'],
+        r['Cocineras'],
+        r['Juventud'],
+        r['SAREN'],
+        r['Otros'],
+        total
+      ]);
+    });
+
+    worksheet.columns.forEach(column => {
+      let maxLen = 0;
+      column.eachCell({ includeEmpty: true }, cell => {
+        const valStr = cell.value ? String(cell.value) : '';
+        if (valStr.length > maxLen) maxLen = valStr.length;
+      });
+      column.width = Math.max(12, maxLen + 2);
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=Reporte_Comidas_Consolidado_${refugio_id}.xlsx`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al generar Excel consolidado de comidas.' });
   }
 });
 
@@ -2419,7 +3307,25 @@ app.post('/api/meals/attendance', authenticateToken, async (req, res) => {
   }
 });
 
-// --- RUTAS DE DONACIONES ---
+// --- RUTAS DE DONACIONES Y DONANTES ---
+app.get('/api/donors', authenticateToken, async (req, res) => {
+  try {
+    const { search } = req.query;
+    let queryStr = 'SELECT * FROM donors';
+    let params = [];
+    if (search) {
+      queryStr += ' WHERE name ILIKE $1 OR rif ILIKE $1 OR organization ILIKE $1';
+      params.push(`%${search.trim()}%`);
+    }
+    queryStr += ' ORDER BY name ASC LIMIT 10';
+    const result = await db.query(queryStr, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener donantes.' });
+  }
+});
+
 app.get('/api/donations', authenticateToken, async (req, res) => {
   try {
     const result = await db.query('SELECT d.*, r.name as refugio_name FROM donations d LEFT JOIN refugios r ON d.refugio_id = r.id ORDER BY d.received_at DESC');
@@ -2431,85 +3337,162 @@ app.get('/api/donations', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/donations', authenticateToken, async (req, res) => {
-  const { refugio_id, donor_name, donor_organization, donor_email, donor_phone, items, destination_warehouse } = req.body;
+  const { refugio_id, donor_name, donor_organization, donor_rif, donor_phone, items, destination_warehouse } = req.body;
   
   if (!donor_name || !items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'El nombre del donante y al menos un artículo son requeridos.' });
   }
 
   try {
-    // 1. Insert details into donations table
+    const cleanName = donor_name.trim().toUpperCase();
+    const cleanOrg = donor_organization ? donor_organization.trim().toUpperCase() : null;
+    const cleanRif = donor_rif ? donor_rif.trim().toUpperCase() : null;
+    const cleanPhone = donor_phone ? donor_phone.trim() : null;
+
+    // 1. Auto-save donor registry
+    if (cleanRif) {
+      await db.query(
+        `INSERT INTO donors (name, organization, rif, phone)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (rif) DO UPDATE
+         SET name = EXCLUDED.name, organization = EXCLUDED.organization, phone = EXCLUDED.phone`,
+        [cleanName, cleanOrg, cleanRif, cleanPhone]
+      );
+    }
+
+    // 2. Insert details into donations table
     const result = await db.query(
-      `INSERT INTO donations (refugio_id, donor_name, donor_organization, donor_email, donor_phone, items_json, destination_warehouse)
+      `INSERT INTO donations (refugio_id, donor_name, donor_organization, donor_rif, donor_phone, items_json, destination_warehouse)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
       [
         refugio_id || null,
-        donor_name,
-        donor_organization || null,
-        donor_email || null,
-        donor_phone || null,
+        cleanName,
+        cleanOrg,
+        cleanRif,
+        cleanPhone,
         JSON.stringify(items),
         destination_warehouse || 'Bodega Central'
       ]
     );
+    const donationId = result.rows[0].id;
 
-    // 2. If donation is assigned to a shelter, sync items to inventory
+    // 3. If donation is assigned to a shelter, sync items to inventory
     if (refugio_id) {
-      // Resolve deposito_id based on destination_warehouse name
-      let deposito_id = null;
-      if (destination_warehouse) {
-        const depRes = await db.query(
-          'SELECT id FROM depositos WHERE refugio_id = $1 AND LOWER(name) = LOWER($2)',
-          [refugio_id, destination_warehouse.trim()]
-        );
-        if (depRes.rows.length > 0) {
-          deposito_id = depRes.rows[0].id;
-        } else {
-          const createDep = await db.query(
-            'INSERT INTO depositos (refugio_id, name, capacity_percent) VALUES ($1, $2, 0) RETURNING id',
-            [refugio_id, destination_warehouse.trim()]
-          );
-          deposito_id = createDep.rows[0].id;
-        }
-      }
-
       for (const item of items) {
         const item_name = item.name;
         const category = item.category || 'Donación';
-        const quantity = parseInt(item.quantity) || 0;
+        const quantity = parseFloat(item.quantity) || 0;
         const unit = item.unit || 'unidades';
 
-        // Check if item exists in inventory for this refugio and depósito (case-insensitive name match)
+        let targetDepId = null;
+        let targetDepName = destination_warehouse || 'Bodega Central';
+
+        // Auto-routing logic based on category
+        if (category === 'Alimentos') {
+          const depRes = await db.query(
+            "SELECT id FROM depositos WHERE refugio_id = $1 AND name ILIKE '%cocina%' LIMIT 1",
+            [refugio_id]
+          );
+          if (depRes.rows.length > 0) {
+            targetDepId = depRes.rows[0].id;
+          } else {
+            const createDep = await db.query(
+              "INSERT INTO depositos (refugio_id, name, capacity_percent) VALUES ($1, 'Cocina', 0) RETURNING id",
+              [refugio_id]
+            );
+            targetDepId = createDep.rows[0].id;
+          }
+          targetDepName = 'Cocina';
+        } else if (category === 'Medicinas') {
+          const depRes = await db.query(
+            "SELECT id FROM depositos WHERE refugio_id = $1 AND (name ILIKE '%medico%' OR name ILIKE '%médico%' OR name ILIKE '%salud%') LIMIT 1",
+            [refugio_id]
+          );
+          if (depRes.rows.length > 0) {
+            targetDepId = depRes.rows[0].id;
+          } else {
+            const createDep = await db.query(
+              "INSERT INTO depositos (refugio_id, name, capacity_percent) VALUES ($1, 'Servicio Médico', 0) RETURNING id",
+              [refugio_id]
+            );
+            targetDepId = createDep.rows[0].id;
+          }
+          targetDepName = 'Servicio Médico';
+        } else if (destination_warehouse) {
+          const depRes = await db.query(
+            'SELECT id FROM depositos WHERE refugio_id = $1 AND LOWER(name) = LOWER($2)',
+            [refugio_id, destination_warehouse.trim()]
+          );
+          if (depRes.rows.length > 0) {
+            targetDepId = depRes.rows[0].id;
+          } else {
+            const createDep = await db.query(
+              'INSERT INTO depositos (refugio_id, name, capacity_percent) VALUES ($1, $2, 0) RETURNING id',
+              [refugio_id, destination_warehouse.trim()]
+            );
+            targetDepId = createDep.rows[0].id;
+          }
+        }
+
+        // Check if item exists in inventory for this refugio and depósito
         const checkItem = await db.query(
           `SELECT id, quantity, min_threshold FROM inventory 
            WHERE refugio_id = $1 AND LOWER(item_name) = LOWER($2) AND category = $3 
            AND (deposito_id = $4 OR (deposito_id IS NULL AND $4 IS NULL))`,
-          [refugio_id, item_name, category, deposito_id]
+          [refugio_id, item_name, category, targetDepId]
         );
 
+        let inventoryItemId;
+        let finalQty;
         if (checkItem.rows.length > 0) {
           const existing = checkItem.rows[0];
-          const newQty = existing.quantity + quantity;
-          const minVal = existing.min_threshold || 5;
+          inventoryItemId = existing.id;
+          finalQty = parseFloat(existing.quantity) + quantity;
+          const minVal = parseFloat(existing.min_threshold) || 5;
           let status = 'Stock Suficiente';
-          if (newQty <= 0) status = 'Sin Stock';
-          else if (newQty < minVal) status = 'Stock Crítico';
+          if (finalQty <= 0) status = 'Sin Stock';
+          else if (finalQty < minVal) status = 'Stock Crítico';
 
           await db.query(
             'UPDATE inventory SET quantity = $1, status = $2, updated_at = NOW() WHERE id = $3',
-            [newQty, status, existing.id]
+            [finalQty, status, inventoryItemId]
           );
         } else {
+          finalQty = quantity;
           let status = 'Stock Suficiente';
           if (quantity <= 0) status = 'Sin Stock';
           else if (quantity < 5) status = 'Stock Crítico';
 
-          await db.query(
+          const insertRes = await db.query(
             `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id)
-             VALUES ($1, $2, $3, $4, 5, $5, $6, $7)`,
-            [refugio_id, item_name, category, quantity, unit, status, deposito_id]
+             VALUES ($1, $2, $3, $4, 5, $5, $6, $7) RETURNING id`,
+            [refugio_id, item_name, category, quantity, unit, status, targetDepId]
           );
+          inventoryItemId = insertRes.rows[0].id;
         }
+
+        // 4. Log movement in inventory_movements
+        const inventory_type = category === 'Alimentos' ? 'cocina' : (category === 'Medicinas' ? 'salud' : 'almacen');
+        await db.query(
+          `INSERT INTO inventory_movements (refugio_id, inventory_id, item_name, category, deposito_id, deposito_name, inventory_type, movement_type, quantity, unit, user_id, user_name, reference_id, details)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+          [
+            refugio_id,
+            inventoryItemId,
+            item_name,
+            category,
+            targetDepId,
+            targetDepName,
+            inventory_type,
+            'ingreso_donacion',
+            quantity,
+            unit,
+            req.user?.id || null,
+            req.user?.name || 'Sistema',
+            donationId,
+            `Ingreso por donación de ${cleanName}`
+          ]
+        );
       }
     }
 

@@ -240,6 +240,10 @@ export default function Sidebar({ user, selectedRefugio, onLogout, mobileOpen = 
                       <span className="material-symbols-outlined text-xs">assignment_late</span>
                       <span>Solicitudes</span>
                     </NavLink>
+                    <NavLink to={`/refugio/${selectedRefugio.id}/almacen/trazabilidad`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
+                      <span className="material-symbols-outlined text-xs">analytics</span>
+                      <span>Trazabilidad de Stock</span>
+                    </NavLink>
                   </div>
                 )}
               </div>

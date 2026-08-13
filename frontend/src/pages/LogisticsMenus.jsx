@@ -12,6 +12,10 @@ export default function LogisticsMenus({ token }) {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
+  // Calendar Date State
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [editDate, setEditDate] = useState('');
+
   // Edit Modal State
   const [showEditModal, setShowEditModal] = useState(false);
   const [editDay, setEditDay] = useState('');
@@ -26,13 +30,28 @@ export default function LogisticsMenus({ token }) {
   const [customItemQty, setCustomItemQty] = useState(1);
   const [customItemUnit, setCustomItemUnit] = useState('Unidades');
 
+  const getWeekDaysWithDates = () => {
+    const base = new Date(selectedDate);
+    const day = base.getDay();
+    const diff = base.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(base.setDate(diff));
+    
+    const names = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    return names.map((name, i) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      const dateStr = d.toISOString().split('T')[0];
+      return { name, date: dateStr };
+    });
+  };
+
   const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
     : 'https://api.venezuelarenacera.com/api');
 
   const DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
   const DAYS_SHORT = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
-  const MEALS = ['Desayuno', 'Almuerzo', 'Merienda', 'Cena'];
+  const MEALS = ['Desayuno', 'Merienda Mañana', 'Almuerzo', 'Merienda', 'Cena'];
   const todayName = DAYS[(new Date().getDay() + 6) % 7];
   const [requirementDay, setRequirementDay] = useState(todayName);
   const [requirementScope, setRequirementScope] = useState('day');
@@ -84,10 +103,14 @@ export default function LogisticsMenus({ token }) {
     }
   };
 
-  const handleCellClick = (day, meal) => {
-    const activeMenu = menus.find(m => m.day_of_week === day && m.meal_type === meal);
+  const handleCellClick = (day, meal, dateStr) => {
+    const activeMenu = menus.find(m => 
+      (m.menu_date && m.menu_date.split('T')[0] === dateStr && m.meal_type === meal) ||
+      (!m.menu_date && m.day_of_week === day && m.meal_type === meal)
+    );
     setEditDay(day);
     setEditMeal(meal);
+    setEditDate(dateStr || '');
     setEditDesc(activeMenu ? activeMenu.description : '');
     setEditIngredients(activeMenu ? activeMenu.ingredients || '' : '');
 
@@ -123,7 +146,8 @@ export default function LogisticsMenus({ token }) {
           day_of_week: editDay,
           meal_type: editMeal,
           description: editDesc,
-          ingredients: compiledIngredients
+          ingredients: compiledIngredients,
+          menu_date: editDate || null
         })
       });
       if (res.ok) {
@@ -141,8 +165,11 @@ export default function LogisticsMenus({ token }) {
   };
 
   // Helper to find description & ingredients for matrix cells
-  const getMenuCell = (day, meal) => {
-    return menus.find(m => m.day_of_week === day && m.meal_type === meal) || null;
+  const getMenuCell = (day, meal, dateStr) => {
+    return menus.find(m => 
+      (m.menu_date && m.menu_date.split('T')[0] === dateStr && m.meal_type === meal) ||
+      (!m.menu_date && m.day_of_week === day && m.meal_type === meal)
+    ) || null;
   };
 
   // Parse resident diets & conditions
@@ -262,10 +289,17 @@ export default function LogisticsMenus({ token }) {
 
   const getRequiredIngredients = () => {
     const reqs = {};
-    menus
-      .filter(m => requirementScope === 'week' || m.day_of_week === requirementDay)
-      .forEach(m => {
-        parseIngredients(m.ingredients).forEach(ingredient => {
+    const weekDays = getWeekDaysWithDates();
+    
+    const targets = requirementScope === 'week' 
+      ? weekDays 
+      : weekDays.filter(d => d.name === requirementDay);
+
+    targets.forEach(dayObj => {
+      MEALS.forEach(meal => {
+        const cell = getMenuCell(dayObj.name, meal, dayObj.date);
+        if (!cell || !cell.ingredients) return;
+        parseIngredients(cell.ingredients).forEach(ingredient => {
           const key = normalizeName(`${ingredient.name}_${ingredient.unit}`);
           if (!reqs[key]) {
             reqs[key] = {
@@ -278,6 +312,7 @@ export default function LogisticsMenus({ token }) {
           reqs[key].quantity += ingredient.quantity;
         });
       });
+    });
     return Object.values(reqs);
   };
 
@@ -298,46 +333,52 @@ export default function LogisticsMenus({ token }) {
   });
 
   // Request only missing daily ingredients from the warehouse
-  const handleRequestMissingIngredients = async () => {
-    const itemsToRequest = missingIngredients.filter(i => i.missing > 0);
-    if (itemsToRequest.length === 0) return;
+  const handleConsumeIngredients = async () => {
+    const weekDays = getWeekDaysWithDates();
+    const matchedDayObj = weekDays.find(d => d.name === requirementDay);
+    const menu_date = matchedDayObj ? matchedDayObj.date : null;
+    const menu_dates = weekDays.map(d => d.date);
+
+    if (dailyRequirements.length === 0) {
+      setError('No hay ingredientes para descontar. Agregue preparaciones con ingredientes al menú.');
+      return;
+    }
 
     setError('');
     setMessage('');
     setLoading(true);
-    let successCount = 0;
 
     try {
-      for (const item of itemsToRequest) {
-        const res = await fetch(`${API_BASE}/refugios/${refugioId}/warehouse-requests`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            area: 'Comedor',
-            item_name: item.name,
-            quantity: item.missing,
-            unit: item.unit,
-            details: requirementScope === 'week'
-              ? 'Requerimiento semanal calculado con las cantidades totales registradas para cada preparación.'
-              : `Requerimiento diario ${requirementDay} calculado con las cantidades totales registradas para cada preparación.`
-          })
-        });
-        if (res.ok) {
-          successCount++;
-        }
-      }
-      if (successCount > 0) {
-        setMessage(`Se enviaron ${successCount} solicitudes del requerimiento ${requirementScope === 'week' ? 'semanal' : `diario de ${requirementDay}`} al almacén central.`);
+      const res = await fetch(`${API_BASE}/refugios/${refugioId}/menus/consume`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          scope: requirementScope,
+          day_of_week: requirementDay,
+          menu_date,
+          menu_dates,
+          ingredients: dailyRequirements.map(req => ({
+            name: req.name,
+            quantity: req.quantity,
+            unit: req.unit
+          }))
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setMessage(data.message || 'El consumo del menú fue registrado y los insumos fueron descontados del inventario de cocina.');
         fetchData();
       } else {
-        setError('Error al enviar las solicitudes al almacén.');
+        const err = await res.json();
+        setError(err.error || 'Error al registrar el consumo del menú.');
       }
     } catch (err) {
       console.error(err);
-      setError('Error de conexión al enviar solicitudes.');
+      setError('Error de conexión al registrar consumo.');
     } finally {
       setLoading(false);
     }
@@ -410,17 +451,29 @@ export default function LogisticsMenus({ token }) {
           <div className="lg:col-span-8 flex flex-col gap-6">
             
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs">
-              <div className="flex justify-between items-center mb-6">
-                <span className="text-xs font-black text-on-surface uppercase tracking-wider">Calendario Semanal</span>
-                <span className="text-[10px] text-on-surface-variant font-bold">Haz clic para cargar el plato y la cantidad total de ingredientes de esa comida</span>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6 pb-4 border-b border-outline-variant/30">
+                <div>
+                  <span className="text-xs font-black text-on-surface uppercase tracking-wider">Planificador de Menús por Fecha</span>
+                  <p className="text-[9px] text-on-surface-variant font-bold mt-0.5">Selecciona cualquier fecha para planificar esa semana calendarizada</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black text-on-surface-variant uppercase">Semana del:</span>
+                  <input 
+                    type="date" 
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="bg-surface-container border border-outline-variant rounded-xl px-3 py-1.5 text-xs font-bold font-mono focus:outline-none"
+                  />
+                </div>
               </div>
 
               {/* Days Headers */}
               <div className="grid grid-cols-7 gap-2 text-center mb-4">
-                {DAYS.map((d, idx) => (
-                  <div key={d} className="bg-surface-container-low border border-outline-variant/30 py-2 rounded-lg">
+                {getWeekDaysWithDates().map((d, idx) => (
+                  <div key={d.name} className="bg-surface-container-low border border-outline-variant/30 py-2 rounded-lg flex flex-col items-center justify-center">
                     <span className="text-[9px] font-black text-[#0b2347] block">{DAYS_SHORT[idx]}</span>
-                    <span className="text-[8px] text-on-surface-variant block mt-0.5">{d}</span>
+                    <span className="text-[8px] text-on-surface-variant block font-bold mt-0.5">{d.name}</span>
+                    <span className="text-[7.5px] text-primary block mt-0.5 font-mono font-black">{d.date.split('-').slice(1).reverse().join('/')}</span>
                   </div>
                 ))}
               </div>
@@ -433,20 +486,30 @@ export default function LogisticsMenus({ token }) {
                   </span>
                   
                   <div className="grid grid-cols-7 gap-2">
-                    {DAYS.map((day) => {
-                      const cell = getMenuCell(day, meal);
+                    {getWeekDaysWithDates().map((dayObj) => {
+                      const cell = getMenuCell(dayObj.name, meal, dayObj.date);
+                      const isConsumed = cell ? cell.is_consumed : false;
                       return (
                         <div 
-                          key={day}
-                          onClick={() => handleCellClick(day, meal)}
-                          className="bg-surface-container-low border border-outline-variant/40 hover:border-primary/50 transition-all rounded-xl p-3 min-h-[95px] flex flex-col justify-between cursor-pointer group shadow-2xs"
+                          key={dayObj.name}
+                          onClick={() => handleCellClick(dayObj.name, meal, dayObj.date)}
+                          className={`border hover:border-primary/50 transition-all rounded-xl p-3 min-h-[95px] flex flex-col justify-between cursor-pointer group shadow-2xs ${
+                            isConsumed ? 'bg-success/5 border-success/30' : 'bg-surface-container-low border-outline-variant/40'
+                          }`}
                         >
-                          <p className="text-[9px] font-bold text-on-surface line-clamp-3 group-hover:text-primary leading-normal">
-                            {cell ? cell.description : 'Programar comida...'}
-                          </p>
-                          {cell && cell.ingredients && (
-                            <span className="text-[8px] font-bold text-primary block mt-2 truncate bg-primary/5 px-1 py-0.5 rounded" title={cell.ingredients}>
-                              🥕 {cell.ingredients}
+                          <div>
+                            <p className="text-[9px] font-bold text-on-surface line-clamp-3 group-hover:text-primary leading-normal">
+                              {cell ? cell.description : 'Programar comida...'}
+                            </p>
+                            {cell && cell.ingredients && (
+                              <span className="text-[8px] font-bold text-primary block mt-2 truncate bg-primary/5 px-1 py-0.5 rounded" title={cell.ingredients}>
+                                🥕 {cell.ingredients}
+                              </span>
+                            )}
+                          </div>
+                          {isConsumed && (
+                            <span className="text-[7px] font-black text-success uppercase mt-1 flex items-center gap-0.5">
+                              <span className="material-symbols-outlined text-[9px]">done_all</span> Consumido
                             </span>
                           )}
                         </div>
@@ -584,13 +647,13 @@ export default function LogisticsMenus({ token }) {
                 </table>
               </div>
 
-              {missingIngredients.some(i => i.missing > 0) && (
+              {dailyRequirements.length > 0 && (
                 <button 
-                  onClick={handleRequestMissingIngredients}
-                  className="w-full py-2 bg-primary text-on-primary font-bold rounded-xl text-xs hover:opacity-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  onClick={handleConsumeIngredients}
+                  className="w-full py-3 bg-[#0b2347] text-white font-bold rounded-xl text-xs hover:opacity-95 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
                 >
-                  <span className="material-symbols-outlined text-sm">shopping_cart_checkout</span>
-                  Solicitar Requerimiento {requirementScope === 'week' ? 'Semanal' : 'Diario'}
+                  <span className="material-symbols-outlined text-sm">restaurant_menu</span>
+                  Registrar Consumo / Descontar del Inventario
                 </button>
               )}
             </div>

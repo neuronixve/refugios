@@ -31,6 +31,7 @@ import Carnetizacion from './pages/Carnetizacion';
 import CarnetizacionPersonal from './pages/CarnetizacionPersonal';
 import PersonalList from './pages/PersonalList';
 import ConsolidatedReports from './pages/ConsolidatedReports';
+import Trazabilidad from './pages/Trazabilidad';
 
 const hasAccess = (user, path, refugioId) => {
   if (!user) return false;
@@ -297,6 +298,7 @@ export default function App() {
   const ControlAccesoWrapper = () => <ControlAcceso token={token} selectedRefugio={selectedRefugio} />;
   const DonacionesWrapper = () => <Donaciones token={token} selectedRefugio={selectedRefugio} />;
   const ConsolidatedReportsWrapper = () => <ConsolidatedReports token={token} />;
+  const TrazabilidadWrapper = () => <Trazabilidad token={token} />;
 
   const ProtectedRoute = ({ element, path }) => {
     const { refugioId } = useParams();
@@ -357,6 +359,7 @@ export default function App() {
               <Route path="/refugio/:refugioId/almacen/entrega" element={<ProtectedRoute element={<Inventory token={token} tab="deliver" />} path="/refugio/:refugioId/almacen/entrega" />} />
               <Route path="/refugio/:refugioId/almacen/historial" element={<ProtectedRoute element={<Inventory token={token} tab="history" />} path="/refugio/:refugioId/almacen/historial" />} />
               <Route path="/refugio/:refugioId/almacen/solicitudes" element={<ProtectedRoute element={<WarehouseRequestsWrapper />} path="/refugio/:refugioId/almacen/solicitudes" />} />
+              <Route path="/refugio/:refugioId/almacen/trazabilidad" element={<ProtectedRoute element={<TrazabilidadWrapper />} path="/refugio/:refugioId/almacen/trazabilidad" />} />
               
               <Route path="/refugio/:refugioId/inventario" element={<Navigate to={selectedRefugio ? `/refugio/${selectedRefugio.id}/almacen/inventario` : '/sedes'} replace />} />
               
