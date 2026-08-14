@@ -179,6 +179,7 @@ async function initDb() {
         CONSTRAINT unique_serving_per_day_type UNIQUE(refugio_id, serving_date, meal_type, person_type)
       )
     `);
+    await runMigration('warehouse_requests.menu_date', 'ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS menu_date DATE');
     
     console.log('Migraciones dinámicas verificadas y aplicadas.');
   } catch (err) {
@@ -2608,11 +2609,11 @@ app.post('/api/refugios/:refugio_id/menus/consume', authenticateToken, async (re
   const { refugio_id } = req.params;
   const { scope, day_of_week, menu_date, menu_dates, ingredients } = req.body;
 
-  if (!ingredients || !Array.isArray(ingredients) || ingredients.length === 0) {
+  if (!ingredients || !Array.isArray(ingredients)) {
     return res.status(400).json({ error: 'La lista de ingredientes a descontar es requerida.' });
   }
 
-  const client = await db.getClient();
+  const client = await db.pool.connect();
   try {
     await client.query('BEGIN');
 
@@ -2764,13 +2765,33 @@ app.get('/api/refugios/:refugio_id/meals/manual-servings', authenticateToken, as
 
 app.post('/api/refugios/:refugio_id/meals/manual-servings', authenticateToken, async (req, res) => {
   const { refugio_id } = req.params;
-  const { serving_date, servings } = req.body;
+  const { serving_date, servings, is_edit } = req.body;
 
   if (!serving_date || !servings || !Array.isArray(servings)) {
     return res.status(400).json({ error: 'Fecha y lista de raciones son requeridas.' });
   }
 
-  const client = await db.getClient();
+  // If not editing, check if manual servings already exist for this date and meal_type
+  if (!is_edit && servings.length > 0) {
+    const checkMeal = servings[0].meal_type;
+    try {
+      const checkExist = await db.query(
+        `SELECT COUNT(*)::int as count FROM manual_meals_servings 
+         WHERE refugio_id = $1 AND serving_date = $2 AND meal_type = $3`,
+        [parseInt(refugio_id), serving_date, checkMeal]
+      );
+      if (checkExist.rows[0].count > 0) {
+        return res.status(400).json({ 
+          error: `Las raciones para el servicio de ${checkMeal} en la fecha ${serving_date.split('-').reverse().join('/')} ya fueron registradas. Use la opción 'Corregir / Editar' en el historial para modificarlas.` 
+        });
+      }
+    } catch (dbErr) {
+      console.error(dbErr);
+      return res.status(500).json({ error: 'Error al verificar duplicados de raciones.' });
+    }
+  }
+
+  const client = await db.pool.connect();
   try {
     await client.query('BEGIN');
     for (const s of servings) {
@@ -2792,6 +2813,27 @@ app.post('/api/refugios/:refugio_id/meals/manual-servings', authenticateToken, a
     res.status(500).json({ error: 'Error al guardar raciones manuales.' });
   } finally {
     client.release();
+  }
+});
+
+app.delete('/api/refugios/:refugio_id/meals/manual-servings', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  const { serving_date, meal_type } = req.query;
+
+  if (!serving_date || !meal_type) {
+    return res.status(400).json({ error: 'Fecha y tipo de comida son requeridos para eliminar.' });
+  }
+
+  try {
+    await db.query(
+      `DELETE FROM manual_meals_servings 
+       WHERE refugio_id = $1 AND serving_date = $2 AND meal_type = $3`,
+      [parseInt(refugio_id), serving_date, meal_type]
+    );
+    res.json({ message: 'Raciones manuales eliminadas correctamente.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al eliminar raciones manuales.' });
   }
 });
 
@@ -2975,10 +3017,11 @@ app.get('/api/refugios/:refugio_id/inventory/movements/download', authenticateTo
     worksheet.columns.forEach(column => {
       let maxLen = 0;
       column.eachCell({ includeEmpty: true }, cell => {
+        if (cell.row === 1) return; // Skip merged title row
         const valStr = cell.value ? String(cell.value) : '';
         if (valStr.length > maxLen) maxLen = valStr.length;
       });
-      column.width = Math.max(12, maxLen + 2);
+      column.width = Math.max(6, maxLen + 2);
     });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -3055,9 +3098,16 @@ app.get('/api/refugios/:refugio_id/meals/manual-servings/download', authenticate
       data[key][personType] = (data[key][personType] || 0) + quantity;
     };
 
-    manualRes.rows.forEach(r => addRow(new Date(r.date).toISOString().split('T')[0], r.meal_type, r.person_type, r.quantity));
-    scannedRes.rows.forEach(r => addRow(new Date(r.date).toISOString().split('T')[0], r.meal_type, r.person_type, r.quantity));
-    scannedStaff.rows.forEach(r => addRow(new Date(r.date).toISOString().split('T')[0], r.meal_type, r.person_type, r.quantity));
+    const formatDate = dVal => {
+      const d = new Date(dVal);
+      const year = d.getUTCFullYear();
+      const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    manualRes.rows.forEach(r => addRow(formatDate(r.date), r.meal_type, r.person_type, r.quantity));
+    scannedRes.rows.forEach(r => addRow(formatDate(r.date), r.meal_type, r.person_type, r.quantity));
+    scannedStaff.rows.forEach(r => addRow(formatDate(r.date), r.meal_type, r.person_type, r.quantity));
 
     const rows = Object.values(data).sort((a, b) => {
       if (a.date !== b.date) return b.date.localeCompare(a.date);
@@ -3179,10 +3229,11 @@ app.get('/api/refugios/:refugio_id/meals/manual-servings/download', authenticate
     worksheet.columns.forEach(column => {
       let maxLen = 0;
       column.eachCell({ includeEmpty: true }, cell => {
+        if (cell.row === 1) return; // Skip merged title row
         const valStr = cell.value ? String(cell.value) : '';
         if (valStr.length > maxLen) maxLen = valStr.length;
       });
-      column.width = Math.max(12, maxLen + 2);
+      column.width = Math.max(6, maxLen + 2);
     });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -3894,6 +3945,42 @@ app.post('/api/refugios/:refugio_id/warehouse-requests', authenticateToken, asyn
   } catch (err) {
     console.error("Error al crear solicitud:", err);
     res.status(500).json({ error: 'Error al crear solicitud al almacén.' });
+  }
+});
+
+app.post('/api/refugios/:refugio_id/warehouse-requests/bulk', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  const { area, items, menu_date } = req.body;
+
+  if (!area || !items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Área y lista de insumos son requeridos.' });
+  }
+
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const createdRequests = [];
+
+    for (const item of items) {
+      const { item_name, quantity, details, unit } = item;
+      if (!item_name || !quantity || parseFloat(quantity) <= 0) continue;
+
+      const result = await client.query(
+        `INSERT INTO warehouse_requests (refugio_id, area, item_name, quantity, details, unit, menu_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [parseInt(refugio_id), area, item_name.trim(), parseFloat(quantity), details || null, unit || 'Unidades', menu_date || null]
+      );
+      createdRequests.push(result.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ message: 'Solicitudes en bloque creadas exitosamente.', requests: createdRequests });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error("Error al crear solicitudes en bloque:", err);
+    res.status(500).json({ error: 'Error al crear solicitudes en bloque al almacén.' });
+  } finally {
+    client.release();
   }
 });
 

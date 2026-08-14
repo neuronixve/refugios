@@ -253,3 +253,78 @@ Hemos integrado funciones avanzadas de edición y exportación directa en todos 
     *   **Ingredientes Personalizados:** Se integró la opción "+ Otro alimento (no registrado)..." en el selector de insumos dentro del modal de programación de menús. Al hacer clic, la fila se transforma dinámicamente mostrando un campo de texto para que el usuario escriba el nombre de cualquier alimento externo.
     *   **Selector de Unidades Comunes:** Para estos ingredientes no registrados, se despliega un selector con las unidades de medida más comunes en la cocina: **Kilos**, **Litros**, **Paquetes**, **Unidades**, **Gramos**, **Latas**, **Bolsas** y **Cajas**.
     *   **Persistencia y Carga:** Las recetas se compilan y se guardan como cadenas estructuradas. Al volver a abrir el modal de edición, el sistema analiza los ingredientes guardados y marca automáticamente como "Personalizados" aquellos cuyos nombres no existan en el stock local, permitiendo editarlos sin romper el flujo de trabajo.
+
+---
+
+## Configuración de Desarrollo Local (Versión 5.28): Puerto 5174 y CORS
+
+Hemos configurado y puesto en marcha el entorno local completo bajo las siguientes especificaciones:
+
+### 1. Configuración de Puerto del Frontend
+*   **[vite.config.js](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/frontend/vite.config.js):** Se añadió el bloque de configuración `server: { port: 5174 }` para garantizar que la aplicación corra de manera predeterminada en `http://localhost:5174`.
+
+### 2. Configuración de CORS y Variables de Entorno en el Backend
+*   **[backend/.env](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/backend/.env):** Se configuró `LOCAL_FRONTEND_ORIGIN=http://localhost:5174` para permitir las peticiones del frontend al backend (`http://localhost:4000`) sin generar problemas de CORS en el navegador.
+
+### 3. Base de Datos y Servidores Activos
+*   **PostgreSQL:** Servidor local de PostgreSQL versión 18 activo y respondiendo en el puerto `5432` con la base de datos `control_refugios` y credenciales configuradas correctamente.
+*   **Backend:** Corriendo de forma persistente en `http://localhost:4000` con migraciones automáticas validadas.
+*   **Frontend:** Corriendo de forma persistente en `http://localhost:5174`.
+
+---
+
+## Correcciones Críticas en Comedor y Logística (Versión 5.29)
+
+Hemos solucionado de inmediato los fallos que afectaban la funcionalidad del comedor e inventario de cocina:
+
+### 1. Corrección de Caída del Servidor (TypeError: db.getClient is not a function)
+*   **[server.js](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/backend/server.js):**
+    *   Se identificó que el backend utilizaba una referencia errónea (`db.getClient()`) al iniciar transacciones tanto en el endpoint de consumo del menú (`POST /api/refugios/:refugio_id/menus/consume`) como en el de raciones manuales (`POST /api/refugios/:refugio_id/meals/manual-servings`). Esto provocaba un crash fatal del servidor Express.
+    *   Se reemplazaron ambas referencias por el método correcto del Pool de PostgreSQL: `db.pool.connect()`.
+    *   Esto solucionó el problema por el cual el inventario y la planificación parecían "borrarse" (en realidad la API no respondía tras el crash) y permite descontar ingredientes deficitarios de manera segura.
+
+### 2. Guardado de Raciones Manuales y Reportes Consolidados
+*   **[server.js](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/backend/server.js):**
+    *   Al solucionar el error de conexión de base de datos anterior, las raciones manuales ingresadas en el modal ahora se guardan exitosamente en la tabla `manual_meals_servings`.
+    *   **Corrección de Zona Horaria en Reportes:** Se introdujo la función helper `formatDate` para formatear los campos de tipo `DATE` utilizando métodos UTC (`getUTCDate`, `getUTCMonth`, `getUTCFullYear`). Esto evita que la conversión a ISO string desplace la fecha al día anterior por la diferencia horaria local (`-04:00`), garantizando reportes de trazabilidad con fechas exactas en Excel.
+
+---
+
+### 3. Control de Duplicados, Flujo Lógico y Reportes por Rango de Fechas (Versión 5.30)
+*   **Prevención de Duplicados en Raciones Manuales:**
+    *   **[server.js](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/backend/server.js):** Se añadió una validación al crear raciones manuales. Si ya existe un registro para esa fecha y servicio de comida, rechaza la solicitud con un error `400 Bad Request` indicando que se debe utilizar la opción "Editar" en el historial.
+    *   **[LogisticsAttendance.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/frontend/src/pages/LogisticsAttendance.jsx):** Se implementó la bandera `isEditingManual` para diferenciar una nueva carga de una edición/corrección. Si ocurre un error de duplicado, se extrae y se muestra el mensaje de error de la API directamente al usuario en el modal.
+*   **Acción de Eliminar Raciones Manuales:**
+    *   **[server.js](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/backend/server.js):** Se creó el endpoint `DELETE /api/refugios/:refugio_id/meals/manual-servings` para eliminar todas las raciones de un día y servicio de comida específico.
+    *   **[LogisticsAttendance.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/frontend/src/pages/LogisticsAttendance.jsx):** Se añadió el botón **Eliminar** (rojo) en la columna de acciones de la tabla histórica con confirmación del navegador para evitar borrados accidentales.
+*   **Filtros de Rango de Fechas para Descargas:**
+    *   **[LogisticsAttendance.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/frontend/src/pages/LogisticsAttendance.jsx):** Se integraron selectores de fecha "Desde" y "Hasta" en el encabezado de asistencia, permitiendo filtrar las raciones manuales antes de exportar el reporte en Excel.
+*   **Ajuste de Ancho de Columnas en Excel (Auto-fit):**
+    *   **[server.js](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/backend/server.js):** Se corrigió la función que calcula el ancho automático de columnas en las hojas Excel generadas para trazabilidad e historial de comidas. Ahora ignora la primera fila (título de reporte con celdas combinadas) al escanear longitudes, evitando que la primera columna sea exageradamente ancha y logrando un espaciado proporcional exacto en base al contenido de los datos y sus encabezados.
+
+---
+
+### 4. Corrección de Desfase de Fechas (Friday 15th) y Visualización de Botones (Versión 5.31)
+*   **Corrección de Zona Horaria en Planificación de Menús:**
+    *   **[LogisticsMenus.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/frontend/src/pages/LogisticsMenus.jsx):** Se reescribió `getWeekDaysWithDates` utilizando objetos de fecha UTC (`Date.UTC`) y métodos UTC (`getUTCDate`, `getUTCDay`, `setUTCDate`). Esto elimina el desfase del huso horario local que provocaba que el viernes 14 de agosto se representara erróneamente en los encabezados del calendario de planificación como sábado 15 de agosto.
+*   **Visibilidad de Botón "Solicitar Insumos Faltantes":**
+    *   **[LogisticsMenus.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/frontend/src/pages/LogisticsMenus.jsx):** Se detectó que el botón de solicitud automática de faltantes utilizaba la clase `bg-error` que no estaba definida en el archivo CSS global del proyecto (donde se importó Tailwind v4 de forma restringida), pintándose de blanco sobre fondo blanco y siendo invisible. Se reemplazó por la clase `bg-red-600` (o color en línea `#dc2626`) y clases de borde verde/rojo Tailwind estándar (`bg-green-50`, `border-green-200`, `bg-red-50`, `border-red-200`), haciéndolos 100% visibles y legibles.
+*   **Visibilidad del Botón "Registrar Consumo":**
+    *   **[LogisticsMenus.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/frontend/src/pages/LogisticsMenus.jsx):** Se eliminó la restricción que condicionaba la renderización del botón a que existieran ingredientes en stock. Ahora el botón "Registrar Consumo / Descontar del Inventario" se renderiza siempre que haya insumos programados (`dailyRequirements.length > 0`), permitiendo a los usuarios registrar el consumo del día y marcar los platos como "CONSUMIDO" con éxito aun si hay stock 0 de insumos físicos.
+
+---
+
+### 5. Prevención de Duplicados en Solicitudes al Almacén (Versión 5.32)
+*   **Nueva Columna de Base de Datos para Trazabilidad por Fecha de Menú:**
+    *   **[server.js](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/backend/server.js):** Se agregó una migración de esquema para añadir la columna `menu_date DATE` en la tabla `warehouse_requests`.
+*   **Soporte de Fecha en Solicitudes en Bloque (Backend):**
+    *   **[server.js](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/backend/server.js):** Se modificó el endpoint `POST /api/refugios/:refugio_id/warehouse-requests/bulk` para admitir el parámetro `menu_date` en la petición e insertarlo correspondiente a cada registro de solicitud de insumo creado.
+*   **Desactivación del Botón de Solicitudes y Alerta de Carga (Frontend):**
+    *   **[LogisticsMenus.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/frontend/src/pages/LogisticsMenus.jsx):**
+        *   Se añadió el estado `warehouseRequests` y se actualizó `fetchData` para consultar las solicitudes ya realizadas del refugio activo.
+        *   Se implementaron los ayudantes `getSelectedDayDate` y `hasPendingRequests` para determinar si ya existe una solicitud de insumos de comedor pendiente para el período seleccionado (día o semana).
+        *   Si ya existe una solicitud pendiente, el botón rojo **"Solicitar Insumos Faltantes"** se desactiva por completo y es sustituido por una alerta visual informativa de color verde: `✓ Solicitud de insumos ya enviada al almacén para este período.`, previniendo envíos accidentales duplicados en lote.
+
+
+
+

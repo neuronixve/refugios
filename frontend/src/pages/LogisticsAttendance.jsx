@@ -15,6 +15,30 @@ const getCurrentMealWindow = (date = new Date()) => {
   return MEAL_WINDOWS.find(window => minutes >= window.start && minutes <= window.end) || null;
 };
 
+const aggregateManualServings = (rows) => {
+  const aggregated = {};
+  rows.forEach(r => {
+    const d = new Date(r.serving_date);
+    const year = d.getUTCFullYear();
+    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    const dateKey = `${year}-${month}-${day}`;
+    
+    const key = `${dateKey}_${r.meal_type}`;
+    if (!aggregated[key]) {
+      aggregated[key] = {
+        date: dateKey,
+        meal_type: r.meal_type,
+        categories: {},
+        total: 0
+      };
+    }
+    aggregated[key].categories[r.person_type] = r.quantity;
+    aggregated[key].total += r.quantity;
+  });
+  return Object.values(aggregated).sort((a, b) => b.date.localeCompare(a.date) || a.meal_type.localeCompare(b.meal_type));
+};
+
 export default function LogisticsAttendance({ token }) {
   const { refugioId } = useParams();
 
@@ -25,6 +49,10 @@ export default function LogisticsAttendance({ token }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [manualServings, setManualServings] = useState([]);
+  const [isEditingManual, setIsEditingManual] = useState(false);
+  const [reportStartDate, setReportStartDate] = useState('');
+  const [reportEndDate, setReportEndDate] = useState('');
 
   // Scanning State
   const [scanning, setScanning] = useState(true);
@@ -58,6 +86,37 @@ export default function LogisticsAttendance({ token }) {
   const scannerRef = useRef(null);
   const lastScanRef = useRef(0);
 
+  const getRegisteredMealsForDate = (dateStr) => {
+    if (!dateStr) return [];
+    return manualServings
+      .filter(s => {
+        const d = new Date(s.serving_date);
+        const year = d.getUTCFullYear();
+        const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(d.getUTCDate()).padStart(2, '0');
+        const sDateStr = `${year}-${month}-${day}`;
+        return sDateStr === dateStr;
+      })
+      .map(s => s.meal_type);
+  };
+
+  const availableMeals = ['Desayuno', 'Merienda Mañana', 'Almuerzo', 'Merienda', 'Cena'].filter(
+    meal => isEditingManual || !getRegisteredMealsForDate(manualDate).includes(meal)
+  );
+
+  useEffect(() => {
+    if (showManualModal && !isEditingManual && manualDate) {
+      const registered = getRegisteredMealsForDate(manualDate);
+      const meals = ['Desayuno', 'Merienda Mañana', 'Almuerzo', 'Merienda', 'Cena'];
+      const firstAvailable = meals.find(m => !registered.includes(m));
+      if (firstAvailable) {
+        setManualMealType(firstAvailable);
+      } else {
+        setManualMealType('');
+      }
+    }
+  }, [manualDate, showManualModal, isEditingManual, manualServings]);
+
   const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost'
     ? 'http://localhost:4000/api'
     : 'https://api.venezuelarenacera.com/api');
@@ -82,7 +141,8 @@ export default function LogisticsAttendance({ token }) {
         },
         body: JSON.stringify({
           serving_date: manualDate,
-          servings: servingsArray
+          servings: servingsArray,
+          is_edit: isEditingManual
         })
       });
 
@@ -102,8 +162,34 @@ export default function LogisticsAttendance({ token }) {
           'SAREN': 0,
           'Otros': 0
         });
+        fetchData();
       } else {
-        setError('Error al guardar las raciones manuales.');
+        const errData = await res.json().catch(() => ({}));
+        setError(errData.error || 'Error al guardar las raciones manuales.');
+      }
+    } catch (err) {
+      console.error(err);
+      setError('Error al conectar con el servidor.');
+    }
+  };
+
+  const handleDeleteManualServings = async (date, mealType) => {
+    if (!window.confirm(`¿Estás seguro de eliminar todas las raciones registradas para ${mealType} en el día ${date.split('-').reverse().join('/')}?`)) {
+      return;
+    }
+    setError('');
+    setMessage('');
+    try {
+      const res = await fetch(`${API_BASE}/refugios/${refugioId}/meals/manual-servings?serving_date=${date}&meal_type=${mealType}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setMessage('Raciones eliminadas correctamente.');
+        fetchData();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setError(errData.error || 'Error al eliminar las raciones manuales.');
       }
     } catch (err) {
       console.error(err);
@@ -112,7 +198,10 @@ export default function LogisticsAttendance({ token }) {
   };
 
   const handleDownloadReportExcel = () => {
-    window.open(`${API_BASE}/refugios/${refugioId}/meals/manual-servings/download`, '_blank');
+    let url = `${API_BASE}/refugios/${refugioId}/meals/manual-servings/download?token=${token}`;
+    if (reportStartDate) url += `&start_date=${reportStartDate}`;
+    if (reportEndDate) url += `&end_date=${reportEndDate}`;
+    window.open(url, '_blank');
   };
 
   useEffect(() => {
@@ -169,6 +258,14 @@ export default function LogisticsAttendance({ token }) {
       });
       if (resAtt.ok) {
         setAttendance(await resAtt.json());
+      }
+
+      // 3. Fetch manual servings
+      const resManual = await fetch(`${API_BASE}/refugios/${refugioId}/meals/manual-servings`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (resManual.ok) {
+        setManualServings(await resManual.json());
       }
     } catch (err) {
       console.error(err);
@@ -445,15 +542,54 @@ export default function LogisticsAttendance({ token }) {
         <div>
           <h2 className="text-2xl font-extrabold text-[#0b2347] uppercase leading-none">Asistencia de Comedor</h2>
           <p className="text-xs text-on-surface-variant mt-1.5 font-mono">Control de entrega de comidas en tiempo real.</p>
-          <div className="flex gap-2 mt-3">
+          <div className="flex flex-wrap items-center gap-2 mt-3">
             <button
-              onClick={() => setShowManualModal(true)}
+              onClick={() => {
+                setIsEditingManual(false);
+                setManualDate(new Date().toISOString().split('T')[0]);
+                setManualMealType('Desayuno');
+                setManualQuantities({
+                  'Afectados': 0,
+                  'Guardia Nacional': 0,
+                  'CICPC': 0,
+                  'Vigilantes': 0,
+                  'Medicos': 0,
+                  'Administrativos': 0,
+                  'Comite': 0,
+                  'Cocineras': 0,
+                  'Juventud': 0,
+                  'SAREN': 0,
+                  'Otros': 0
+                });
+                setShowManualModal(true);
+              }}
               className="py-2 px-4 text-white font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-sm hover:opacity-95 transition-all"
               style={{ backgroundColor: '#0b2347' }}
             >
               <span className="material-symbols-outlined text-xs">add_box</span>
               Registrar Raciones Manuales
             </button>
+
+            <div className="flex items-center gap-1.5 bg-surface-container border border-outline-variant rounded-xl px-3 py-1.5 text-xs font-bold">
+              <span className="text-[9px] font-black text-on-surface-variant uppercase">Desde:</span>
+              <input 
+                type="date" 
+                value={reportStartDate} 
+                onChange={e => setReportStartDate(e.target.value)} 
+                className="bg-transparent border-0 focus:outline-none text-[10px] font-bold text-on-surface font-mono"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-surface-container border border-outline-variant rounded-xl px-3 py-1.5 text-xs font-bold">
+              <span className="text-[9px] font-black text-on-surface-variant uppercase">Hasta:</span>
+              <input 
+                type="date" 
+                value={reportEndDate} 
+                onChange={e => setReportEndDate(e.target.value)} 
+                className="bg-transparent border-0 focus:outline-none text-[10px] font-bold text-on-surface font-mono"
+              />
+            </div>
+
             <button
               onClick={handleDownloadReportExcel}
               className="py-2 px-4 text-white font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-sm hover:opacity-95 transition-all"
@@ -800,6 +936,94 @@ export default function LogisticsAttendance({ token }) {
 
       </div>
 
+      {/* Historical manual servings log */}
+      <div className="mt-8 bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs flex flex-col gap-4">
+        <h3 className="text-xs font-black text-on-surface uppercase tracking-wider flex items-center gap-2 border-b border-outline-variant/30 pb-3">
+          <span className="material-symbols-outlined text-sm text-[#0b2347]">history</span>
+          Historial de Raciones Manuales Registradas
+        </h3>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-[11px] border-collapse">
+            <thead>
+              <tr className="border-b border-outline-variant text-on-surface-variant font-bold">
+                <th className="pb-2">Fecha</th>
+                <th className="pb-2">Comida</th>
+                <th className="pb-2 text-center">Total Raciones</th>
+                <th className="pb-2">Desglose por Categoría</th>
+                <th className="pb-2 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {aggregateManualServings(manualServings).map((row, idx) => (
+                <tr key={idx} className="border-b border-outline-variant/30 hover:bg-surface-container-low/30 transition-colors">
+                  <td className="py-2.5 font-bold text-on-surface font-mono">{row.date.split('-').reverse().join('/')}</td>
+                  <td className="py-2.5 font-bold text-primary">{row.meal_type}</td>
+                  <td className="py-2.5 text-center font-bold font-mono text-on-surface text-xs">
+                    <span className="px-2 py-0.5 bg-primary/10 text-[#0b2347] rounded-lg">
+                      {row.total}
+                    </span>
+                  </td>
+                  <td className="py-2.5 text-on-surface-variant max-w-md truncate">
+                    {Object.entries(row.categories)
+                      .filter(([_, qty]) => qty > 0)
+                      .map(([cat, qty]) => `${cat}: ${qty}`)
+                      .join(', ') || <span className="italic text-on-surface-variant/40">Sin raciones</span>}
+                  </td>
+                  <td className="py-2.5 text-right">
+                    <div className="flex justify-end gap-3">
+                      <button
+                        onClick={() => {
+                          const updated = {
+                            'Afectados': 0,
+                            'Guardia Nacional': 0,
+                            'CICPC': 0,
+                            'Vigilantes': 0,
+                            'Medicos': 0,
+                            'Administrativos': 0,
+                            'Comite': 0,
+                            'Cocineras': 0,
+                            'Juventud': 0,
+                            'SAREN': 0,
+                            'Otros': 0
+                          };
+                          Object.entries(row.categories).forEach(([cat, qty]) => {
+                            updated[cat] = qty;
+                          });
+                          setIsEditingManual(true);
+                          setManualDate(row.date);
+                          setManualMealType(row.meal_type);
+                          setManualQuantities(updated);
+                          setShowManualModal(true);
+                        }}
+                        className="text-xs text-primary font-bold hover:underline cursor-pointer flex items-center gap-1 inline-flex animate-fade-in"
+                      >
+                        <span className="material-symbols-outlined text-[12px]">edit</span>
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => handleDeleteManualServings(row.date, row.meal_type)}
+                        className="text-xs text-error font-bold hover:underline cursor-pointer flex items-center gap-1 inline-flex animate-fade-in"
+                      >
+                        <span className="material-symbols-outlined text-[12px]">delete</span>
+                        Eliminar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {manualServings.length === 0 && (
+                <tr>
+                  <td colSpan="5" className="py-8 text-center italic text-on-surface-variant">
+                    No se han registrado raciones manuales aún.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* Error Popup Alert overlay if needed */}
       {error && !scanning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs">
@@ -855,17 +1079,28 @@ export default function LogisticsAttendance({ token }) {
                   <select
                     value={manualMealType}
                     onChange={(e) => setManualMealType(e.target.value)}
+                    disabled={isEditingManual || availableMeals.length === 0}
                     className="bg-surface-container-low border border-outline-variant rounded-xl p-2.5 font-bold focus:outline-none"
                     required
                   >
-                    <option value="Desayuno">Desayuno</option>
-                    <option value="Merienda Mañana">Merienda Mañana</option>
-                    <option value="Almuerzo">Almuerzo</option>
-                    <option value="Merienda">Merienda Tarde</option>
-                    <option value="Cena">Cena</option>
+                    {availableMeals.map(meal => (
+                      <option key={meal} value={meal}>
+                        {meal === 'Merienda' ? 'Merienda Tarde' : meal}
+                      </option>
+                    ))}
+                    {availableMeals.length === 0 && (
+                      <option value="">No hay comidas disponibles</option>
+                    )}
                   </select>
                 </div>
               </div>
+
+              {availableMeals.length === 0 && !isEditingManual && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs font-bold text-red-750 flex items-center gap-1.5 animate-fade-in" style={{ color: '#b91c1c', borderColor: '#fca5a5', backgroundColor: '#fef2f2' }}>
+                  <span className="material-symbols-outlined text-sm">warning</span>
+                  Todas las comidas ya fueron registradas para esta fecha. Utiliza la opción 'Editar' o 'Eliminar' en el historial si necesitas realizar modificaciones.
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-bold text-on-surface-variant block mb-2">Cantidad de platos servidos por categoría:</label>
@@ -902,7 +1137,8 @@ export default function LogisticsAttendance({ token }) {
                 </button>
                 <button
                   type="submit"
-                  className="py-2.5 px-5 text-white font-bold rounded-xl text-xs cursor-pointer hover:opacity-95"
+                  disabled={availableMeals.length === 0}
+                  className={`py-2.5 px-5 text-white font-bold rounded-xl text-xs cursor-pointer ${availableMeals.length === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-95'}`}
                   style={{ backgroundColor: '#0b2347' }}
                 >
                   Guardar Raciones

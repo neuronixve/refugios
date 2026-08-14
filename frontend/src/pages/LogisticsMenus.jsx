@@ -11,6 +11,7 @@ export default function LogisticsMenus({ token }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [warehouseRequests, setWarehouseRequests] = useState([]);
 
   // Calendar Date State
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -31,17 +32,37 @@ export default function LogisticsMenus({ token }) {
   const [customItemUnit, setCustomItemUnit] = useState('Unidades');
 
   const getWeekDaysWithDates = () => {
-    const base = new Date(selectedDate);
-    const day = base.getDay();
-    const diff = base.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(base.setDate(diff));
+    const [year, month, day] = selectedDate.split('-').map(Number);
+    const base = new Date(Date.UTC(year, month - 1, day));
+    const dayOfWeek = base.getUTCDay();
+    const diff = base.getUTCDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+    const monday = new Date(Date.UTC(year, month - 1, diff));
     
     const names = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
     return names.map((name, i) => {
       const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
+      d.setUTCDate(monday.getUTCDate() + i);
       const dateStr = d.toISOString().split('T')[0];
       return { name, date: dateStr };
+    });
+  };
+
+  const getSelectedDayDate = () => {
+    const weekDays = getWeekDaysWithDates();
+    const dayObj = weekDays.find(d => d.name === requirementDay);
+    return dayObj ? dayObj.date : null;
+  };
+
+  const hasPendingRequests = () => {
+    const weekDays = getWeekDaysWithDates();
+    const targetDates = requirementScope === 'week'
+      ? weekDays.map(d => d.date)
+      : [getSelectedDayDate()].filter(Boolean);
+
+    return warehouseRequests.some(r => {
+      if (r.area !== 'Comedor' || !r.menu_date) return false;
+      const reqDate = new Date(r.menu_date).toISOString().split('T')[0];
+      return targetDates.includes(reqDate);
     });
   };
 
@@ -95,6 +116,14 @@ export default function LogisticsMenus({ token }) {
       if (resStaff.ok) {
         const staffData = await resStaff.json();
         setStaffCount(staffData.count || 0);
+      }
+
+      // 5. Fetch warehouse requests to check duplicate orders
+      const resReqs = await fetch(`${API_BASE}/refugios/${refugioId}/warehouse-requests`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (resReqs.ok) {
+        setWarehouseRequests(await resReqs.json());
       }
     } catch (err) {
       console.error(err);
@@ -299,6 +328,7 @@ export default function LogisticsMenus({ token }) {
       MEALS.forEach(meal => {
         const cell = getMenuCell(dayObj.name, meal, dayObj.date);
         if (!cell || !cell.ingredients) return;
+        if (cell.is_consumed) return; // Skip already consumed meals
         parseIngredients(cell.ingredients).forEach(ingredient => {
           const key = normalizeName(`${ingredient.name}_${ingredient.unit}`);
           if (!reqs[key]) {
@@ -360,11 +390,16 @@ export default function LogisticsMenus({ token }) {
           day_of_week: requirementDay,
           menu_date,
           menu_dates,
-          ingredients: dailyRequirements.map(req => ({
-            name: req.name,
-            quantity: req.quantity,
-            unit: req.unit
-          }))
+          ingredients: dailyRequirements.map(req => {
+            const invItem = inventory.find(inv => normalizeName(inv.item_name) === normalizeName(req.name));
+            const stock = invItem ? invItem.quantity : 0;
+            const discountQty = Math.min(req.quantity, stock);
+            return {
+              name: req.name,
+              quantity: discountQty,
+              unit: req.unit
+            };
+          }).filter(ing => ing.quantity > 0)
         })
       });
 
@@ -379,6 +414,57 @@ export default function LogisticsMenus({ token }) {
     } catch (err) {
       console.error(err);
       setError('Error de conexión al registrar consumo.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendBulkRequest = async () => {
+    if (hasPendingRequests()) {
+      setError('Ya existe una solicitud de insumos pendiente para este período.');
+      return;
+    }
+
+    const missingItems = missingIngredients.filter(item => item.missing > 0);
+    if (missingItems.length === 0) return;
+
+    setError('');
+    setMessage('');
+    setLoading(true);
+
+    try {
+      const targetDate = requirementScope === 'week'
+        ? getWeekDaysWithDates()[0].date
+        : getSelectedDayDate();
+
+      const res = await fetch(`${API_BASE}/refugios/${refugioId}/warehouse-requests/bulk`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          area: 'Comedor',
+          menu_date: targetDate,
+          items: missingItems.map(item => ({
+            item_name: item.name,
+            quantity: item.missing,
+            unit: item.unit,
+            details: `Solicitud automática de insumos faltantes para la planificación del menú (${requirementScope === 'week' ? 'Semana completa' : requirementDay}).`
+          }))
+        })
+      });
+
+      if (res.ok) {
+        setMessage('Solicitud de insumos faltantes enviada al almacén correctamente.');
+        fetchData();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setError(err.error || 'Error al enviar solicitudes en bloque.');
+      }
+    } catch (err) {
+      console.error(err);
+      setError('Error al conectar con la API.');
     } finally {
       setLoading(false);
     }
@@ -600,61 +686,141 @@ export default function LogisticsMenus({ token }) {
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-[10px] border-collapse">
-                  <thead>
-                    <tr className="border-b border-outline-variant text-on-surface-variant font-bold">
-                      <th className="pb-2">Ingrediente</th>
-                      <th className="pb-2 text-center">Total {requirementScope === 'week' ? 'Semana' : 'Día'}</th>
-                      <th className="pb-2 text-center">Stock</th>
-                      <th className="pb-2 text-center">Disponible Restante</th>
-                      <th className="pb-2 text-right">Faltante</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {missingIngredients.map((item, idx) => {
-                      const diff = item.stock - item.required;
-                      return (
-                        <tr key={idx} className="border-b border-outline-variant/30">
-                          <td className="py-2 font-bold text-on-surface">{item.name}</td>
-                          <td className="py-2 text-center font-mono text-on-surface-variant">{formatQuantity(item.required)}</td>
-                          <td className="py-2 text-center font-mono text-on-surface-variant">{formatQuantity(item.stock)}</td>
-                          <td className={`py-2 text-center font-mono font-bold ${diff < 0 ? 'text-error' : 'text-success'}`}>
-                            {diff >= 0 ? '+' : ''}{formatQuantity(diff)} {item.unit}
-                          </td>
-                          <td className="py-2 text-right">
-                            {item.missing > 0 ? (
-                              <span className="px-1.5 py-0.5 bg-error-container/20 text-error font-black rounded text-[8px] font-mono">
-                                +{formatQuantity(item.missing)} {item.unit}
-                              </span>
-                            ) : (
-                              <span className="px-1.5 py-0.5 bg-success/10 text-success font-black rounded text-[8px]">
-                                Cubierto
-                              </span>
+              {/* Differentiate available and missing ingredients */}
+              {dailyRequirements.length === 0 ? (
+                <div className="py-8 px-4 text-center italic text-on-surface-variant text-[11px] bg-surface-container-low border border-outline-variant/30 rounded-2xl flex flex-col items-center justify-center gap-2 animate-fade-in">
+                  <span className="material-symbols-outlined text-2xl text-on-surface-variant/50">inventory_2</span>
+                  {menus.some(m => 
+                    (m.menu_date && m.menu_date.split('T')[0] === getWeekDaysWithDates().find(d => d.name === requirementDay)?.date) ||
+                    (!m.menu_date && m.day_of_week === requirementDay)
+                  ) ? (
+                    <span className="text-green-700 font-bold not-italic flex items-center gap-1.5" style={{ color: '#15803d' }}>
+                      <span className="material-symbols-outlined text-sm">check_circle</span>
+                      Todas las comidas programadas para hoy ya fueron consumidas y descontadas del inventario.
+                    </span>
+                  ) : (
+                    <span>No hay comidas programadas para hoy en el menú. Utiliza el planificador de la izquierda para agregar platos.</span>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-col gap-5 animate-fade-in">
+                    
+                    {/* 1. DISPONIBLES EN STOCK */}
+                    <div>
+                      <h4 className="text-[10px] font-black text-green-700 uppercase tracking-wider flex items-center gap-1.5 mb-2" style={{ color: '#15803d' }}>
+                        <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                        Insumos Disponibles (Se descontarán del inventario)
+                      </h4>
+                      <div className="overflow-x-auto bg-green-50/30 border border-green-200/50 rounded-xl p-3">
+                        <table className="w-full text-left text-[10px] border-collapse">
+                          <thead>
+                            <tr className="border-b border-green-200/30 text-on-surface-variant font-bold">
+                              <th className="pb-1.5">Ingrediente</th>
+                              <th className="pb-1.5 text-center">Requerido</th>
+                              <th className="pb-1.5 text-center">Stock Cocina</th>
+                              <th className="pb-1.5 text-right text-green-700" style={{ color: '#15803d' }}>Disponible Restante</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {missingIngredients.filter(item => item.missing === 0).map((item, idx) => {
+                              const diff = item.stock - item.required;
+                              return (
+                                <tr key={idx} className="border-b border-outline-variant/5 last:border-0 hover:bg-green-50/50 transition-colors">
+                                  <td className="py-2.5 font-bold text-on-surface">{item.name}</td>
+                                  <td className="py-2.5 text-center font-mono font-bold text-on-surface-variant">{formatQuantity(item.required)}</td>
+                                  <td className="py-2.5 text-center font-mono font-bold text-on-surface-variant">{formatQuantity(item.stock)}</td>
+                                  <td className="py-2.5 text-right font-mono font-black text-green-700" style={{ color: '#15803d' }}>
+                                    +{formatQuantity(diff)} {item.unit}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {missingIngredients.filter(item => item.missing === 0).length === 0 && (
+                              <tr>
+                                <td colSpan="4" className="py-4 text-center italic text-on-surface-variant/60">
+                                  No hay insumos disponibles cubiertos en stock.
+                                </td>
+                              </tr>
                             )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {missingIngredients.length === 0 && (
-                      <tr>
-                        <td colSpan="4" className="py-4 text-center italic text-on-surface-variant">
-                          Sin requerimientos para {requirementScope === 'week' ? 'la semana' : requirementDay}. Cargue las cantidades totales de ingredientes en el menú.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
 
-              {dailyRequirements.length > 0 && (
-                <button 
-                  onClick={handleConsumeIngredients}
-                  className="w-full py-3 bg-[#0b2347] text-white font-bold rounded-xl text-xs hover:opacity-95 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-                >
-                  <span className="material-symbols-outlined text-sm">restaurant_menu</span>
-                  Registrar Consumo / Descontar del Inventario
-                </button>
+                    {/* 2. FALTANTES */}
+                    <div>
+                      <h4 className="text-[10px] font-black text-red-700 uppercase tracking-wider flex items-center gap-1.5 mb-2" style={{ color: '#b91c1c' }}>
+                        <span className="material-symbols-outlined text-[14px]">warning</span>
+                        Insumos Faltantes (Requieren Solicitud al Almacén)
+                      </h4>
+                      <div className="overflow-x-auto bg-red-50/30 border border-red-200/50 rounded-xl p-3">
+                        <table className="w-full text-left text-[10px] border-collapse">
+                          <thead>
+                            <tr className="border-b border-red-200/30 text-on-surface-variant font-bold">
+                              <th className="pb-1.5">Ingrediente</th>
+                              <th className="pb-1.5 text-center">Requerido</th>
+                              <th className="pb-1.5 text-center">Stock Cocina</th>
+                              <th className="pb-1.5 text-right text-red-700" style={{ color: '#b91c1c' }}>Faltante</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {missingIngredients.filter(item => item.missing > 0).map((item, idx) => {
+                              return (
+                                <tr key={idx} className="border-b border-outline-variant/5 last:border-0 hover:bg-red-50/50 transition-colors">
+                                  <td className="py-2.5 font-bold text-on-surface">{item.name}</td>
+                                  <td className="py-2.5 text-center font-mono font-bold text-on-surface-variant">{formatQuantity(item.required)}</td>
+                                  <td className="py-2.5 text-center font-mono font-bold text-on-surface-variant">{formatQuantity(item.stock)}</td>
+                                  <td className="py-2.5 text-right font-mono font-black text-red-700" style={{ color: '#b91c1c' }}>
+                                    +{formatQuantity(item.missing)} {item.unit}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {missingIngredients.filter(item => item.missing > 0).length === 0 && (
+                              <tr>
+                                <td colSpan="4" className="py-4 text-center italic text-green-700 font-extrabold" style={{ color: '#15803d' }}>
+                                  ✓ ¡Todos los insumos requeridos están disponibles!
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                      
+                      {/* Bulk request button */}
+                      {missingIngredients.some(item => item.missing > 0) && (
+                        hasPendingRequests() ? (
+                          <div className="mt-2.5 p-2 bg-green-50 border border-green-200 rounded-xl text-[10px] font-bold text-green-700 flex items-center justify-center gap-1.5 animate-fade-in" style={{ color: '#15803d', borderColor: '#bbf7d0', backgroundColor: '#f0fdf4' }}>
+                            <span className="material-symbols-outlined text-sm">check_circle</span>
+                            Solicitud de insumos ya enviada al almacén para este período.
+                          </div>
+                        ) : (
+                          <button
+                            onClick={handleSendBulkRequest}
+                            className="w-full mt-2.5 py-2.5 px-4 text-white font-bold rounded-xl text-[10px] hover:opacity-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs border-0"
+                            style={{ backgroundColor: '#dc2626' }}
+                          >
+                            <span className="material-symbols-outlined text-sm">local_shipping</span>
+                            Solicitar Insumos Faltantes al Almacén
+                          </button>
+                        )
+                      )}
+                    </div>
+
+                  </div>
+
+                  {dailyRequirements.length > 0 && (
+                    <button 
+                      onClick={handleConsumeIngredients}
+                      className="w-full mt-4 py-3 bg-[#0b2347] text-white font-bold rounded-xl text-xs hover:opacity-95 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm border-0"
+                      style={{ backgroundColor: '#0b2347' }}
+                    >
+                      <span className="material-symbols-outlined text-sm">restaurant_menu</span>
+                      Registrar Consumo / Descontar del Inventario
+                    </button>
+                  )}
+                </>
               )}
             </div>
 

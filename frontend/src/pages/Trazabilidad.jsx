@@ -75,6 +75,7 @@ export default function Trazabilidad({ token }) {
     if (inventoryType) queryParams.push(`inventory_type=${inventoryType}`);
     if (movementType) queryParams.push(`movement_type=${movementType}`);
     if (selectedDeposito) queryParams.push(`deposito_id=${selectedDeposito}`);
+    queryParams.push(`token=${token}`);
 
     const queryString = queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
     window.open(`${API_BASE}/refugios/${refugioId}/inventory/movements/download${queryString}`, '_blank');
