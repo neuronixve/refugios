@@ -324,7 +324,16 @@ Hemos solucionado de inmediato los fallos que afectaban la funcionalidad del com
         *   Se añadió el estado `warehouseRequests` y se actualizó `fetchData` para consultar las solicitudes ya realizadas del refugio activo.
         *   Se implementaron los ayudantes `getSelectedDayDate` y `hasPendingRequests` para determinar si ya existe una solicitud de insumos de comedor pendiente para el período seleccionado (día o semana).
         *   Si ya existe una solicitud pendiente, el botón rojo **"Solicitar Insumos Faltantes"** se desactiva por completo y es sustituido por una alerta visual informativa de color verde: `✓ Solicitud de insumos ya enviada al almacén para este período.`, previniendo envíos accidentales duplicados en lote.
+---
 
-
-
+### 6. Prevención de Duplicados en Carga de Raciones Manuales (Versión 5.33)
+*   **Filtro Dinámico de Comidas Disponibles por Fecha:**
+    *   **[LogisticsAttendance.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/frontend/src/pages/LogisticsAttendance.jsx):**
+        *   Se implementaron las funciones `getRegisteredMealsForDate` y `availableMeals` para analizar qué tipo de comidas (Desayuno, Merienda Mañana, Almuerzo, Merienda, Cena) ya han sido registradas para la fecha seleccionada en el formulario.
+        *   El desplegable de "Tipo de Comida" ahora se filtra dinámicamente: solo muestra las opciones de comida que **no** han sido registradas aún para la fecha elegida.
+        *   Se añadió un efecto de ciclo de vida (`useEffect`) para restablecer automáticamente la comida seleccionada por defecto al primer tipo de comida disponible al cambiar de fecha.
+*   **Bloqueo de Envío y Alerta Informativa:**
+    *   **[LogisticsAttendance.jsx](file:///Users/sergiovladimirjimenezvizcaya/Documents/TRABAJO/control-refugios-saren-v2/frontend/src/pages/LogisticsAttendance.jsx):**
+        *   Si todas las comidas para una fecha ya han sido registradas (cuando no quedan opciones disponibles), el selector se deshabilita y se renderiza un aviso en color rojo que le indica al usuario que la fecha ya tiene todos sus registros cargados: `⚠️ Todas las comidas ya fueron registradas para esta fecha. Utiliza la opción 'Editar' o 'Eliminar' en el historial si necesitas realizar modificaciones.`
+        *   El botón de **Guardar Raciones** se deshabilita automáticamente y reduce su opacidad, bloqueando por completo la posibilidad de enviar registros manuales duplicados.
 

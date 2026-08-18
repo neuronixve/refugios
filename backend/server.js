@@ -166,6 +166,9 @@ async function initDb() {
     `);
     await runMigration('menus.menu_date', 'ALTER TABLE menus ADD COLUMN IF NOT EXISTS menu_date DATE');
     await runMigration('menus.is_consumed', 'ALTER TABLE menus ADD COLUMN IF NOT EXISTS is_consumed BOOLEAN DEFAULT FALSE');
+    await runMigration('drop unique_menu_per_day_meal constraint', 'ALTER TABLE menus DROP CONSTRAINT IF EXISTS unique_menu_per_day_meal');
+    await runMigration('menus.unique_menu_weekly_default', 'CREATE UNIQUE INDEX IF NOT EXISTS unique_menu_weekly_default ON menus (refugio_id, day_of_week, meal_type) WHERE menu_date IS NULL');
+    await runMigration('menus.unique_menu_by_date', 'CREATE UNIQUE INDEX IF NOT EXISTS unique_menu_by_date ON menus (refugio_id, menu_date, meal_type) WHERE menu_date IS NOT NULL');
     await runMigration('manual_meals_servings table', `
       CREATE TABLE IF NOT EXISTS manual_meals_servings (
         id SERIAL PRIMARY KEY,
@@ -2570,7 +2573,7 @@ app.post('/api/refugios/:refugio_id/menus', authenticateToken, async (req, res) 
       result = await db.query(
         `INSERT INTO menus (refugio_id, day_of_week, meal_type, description, ingredients, diets_json)
          VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (refugio_id, day_of_week, meal_type) DO UPDATE 
+         ON CONFLICT (refugio_id, day_of_week, meal_type) WHERE menu_date IS NULL DO UPDATE 
          SET description = EXCLUDED.description, ingredients = EXCLUDED.ingredients, diets_json = EXCLUDED.diets_json
          RETURNING *`,
         [refugio_id, day_of_week, meal_type, description, ingredients, diets_json || '{}']
@@ -2594,7 +2597,7 @@ app.delete('/api/refugios/:refugio_id/menus', authenticateToken, async (req, res
       );
     } else {
       await db.query(
-        'DELETE FROM menus WHERE refugio_id = $1 AND day_of_week = $2 AND meal_type = $3',
+        'DELETE FROM menus WHERE refugio_id = $1 AND day_of_week = $2 AND meal_type = $3 AND menu_date IS NULL',
         [parseInt(refugio_id), day_of_week, meal_type]
       );
     }

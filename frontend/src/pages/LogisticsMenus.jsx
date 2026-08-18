@@ -25,6 +25,7 @@ export default function LogisticsMenus({ token }) {
   const [editIngredients, setEditIngredients] = useState('');
   const [recipeItems, setRecipeItems] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [hasExistingMenu, setHasExistingMenu] = useState(false);
 
   // Manual request states
   const [customItemName, setCustomItemName] = useState('');
@@ -142,6 +143,7 @@ export default function LogisticsMenus({ token }) {
     setEditDate(dateStr || '');
     setEditDesc(activeMenu ? activeMenu.description : '');
     setEditIngredients(activeMenu ? activeMenu.ingredients || '' : '');
+    setHasExistingMenu(!!activeMenu);
 
     const parsed = parseIngredients(activeMenu ? activeMenu.ingredients : '');
     const mapped = parsed.map(item => ({
@@ -185,6 +187,34 @@ export default function LogisticsMenus({ token }) {
         fetchData();
       } else {
         setError('Error al actualizar el menú.');
+      }
+    } catch (err) {
+      setError('Error al conectar con la API.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteMenu = async () => {
+    if (!window.confirm('¿Está seguro de que desea eliminar este menú de la planificación?')) return;
+    setError('');
+    setMessage('');
+    setSaving(true);
+
+    try {
+      const url = `${API_BASE}/refugios/${refugioId}/menus?day_of_week=${encodeURIComponent(editDay)}&meal_type=${encodeURIComponent(editMeal)}&menu_date=${encodeURIComponent(editDate || '')}`;
+      const res = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        setMessage(`Menú de ${editMeal} para el ${editDay} eliminado correctamente.`);
+        setShowEditModal(false);
+        fetchData();
+      } else {
+        setError('Error al eliminar el menú.');
       }
     } catch (err) {
       setError('Error al conectar con la API.');
@@ -1076,13 +1106,27 @@ export default function LogisticsMenus({ token }) {
                 </span>
               </div>
 
-              <button 
-                type="submit" 
-                disabled={saving}
-                className="mt-2 w-full py-3 bg-[#0b2347] text-white font-bold rounded-lg shadow-sm hover:opacity-95 transition-all cursor-pointer text-xs"
-              >
-                {saving ? 'Guardando...' : 'Guardar en Planificación'}
-              </button>
+              <div className="flex flex-col gap-2 mt-2">
+                <button 
+                  type="submit" 
+                  disabled={saving}
+                  className="w-full py-3 bg-[#0b2347] text-white font-bold rounded-lg shadow-sm hover:opacity-95 transition-all cursor-pointer text-xs"
+                >
+                  {saving ? 'Guardando...' : 'Guardar en Planificación'}
+                </button>
+
+                {hasExistingMenu && (
+                  <button 
+                    type="button" 
+                    disabled={saving}
+                    onClick={handleDeleteMenu}
+                    className="w-full py-3 bg-[#b3261e] text-white font-bold rounded-lg shadow-sm hover:opacity-90 transition-all cursor-pointer text-xs flex items-center justify-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-sm">delete</span>
+                    {saving ? 'Eliminando...' : 'Eliminar de la Planificación'}
+                  </button>
+                )}
+              </div>
             </form>
           </div>
         </div>

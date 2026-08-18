@@ -135,8 +135,14 @@ CREATE TABLE IF NOT EXISTS menus (
     meal_type VARCHAR(20) NOT NULL, -- 'Desayuno', 'Almuerzo', 'Cena'
     description TEXT NOT NULL,
     ingredients TEXT,
-    CONSTRAINT unique_menu_per_day_meal UNIQUE (refugio_id, day_of_week, meal_type)
+    diets_json TEXT DEFAULT '{}',
+    menu_date DATE,
+    is_consumed BOOLEAN DEFAULT FALSE
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS unique_menu_weekly_default ON menus (refugio_id, day_of_week, meal_type) WHERE menu_date IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS unique_menu_by_date ON menus (refugio_id, menu_date, meal_type) WHERE menu_date IS NOT NULL;
+
 
 -- Tabla de Asistencia a Comedor
 CREATE TABLE IF NOT EXISTS meal_attendance (
