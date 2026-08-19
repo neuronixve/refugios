@@ -135,8 +135,7 @@ export default function LogisticsMenus({ token }) {
 
   const handleCellClick = (day, meal, dateStr) => {
     const activeMenu = menus.find(m => 
-      (m.menu_date && m.menu_date.split('T')[0] === dateStr && m.meal_type === meal) ||
-      (!m.menu_date && m.day_of_week === day && m.meal_type === meal)
+      m.menu_date && m.menu_date.split('T')[0] === dateStr && m.meal_type === meal
     );
     setEditDay(day);
     setEditMeal(meal);
@@ -226,8 +225,7 @@ export default function LogisticsMenus({ token }) {
   // Helper to find description & ingredients for matrix cells
   const getMenuCell = (day, meal, dateStr) => {
     return menus.find(m => 
-      (m.menu_date && m.menu_date.split('T')[0] === dateStr && m.meal_type === meal) ||
-      (!m.menu_date && m.day_of_week === day && m.meal_type === meal)
+      m.menu_date && m.menu_date.split('T')[0] === dateStr && m.meal_type === meal
     ) || null;
   };
 
@@ -721,8 +719,7 @@ export default function LogisticsMenus({ token }) {
                 <div className="py-8 px-4 text-center italic text-on-surface-variant text-[11px] bg-surface-container-low border border-outline-variant/30 rounded-2xl flex flex-col items-center justify-center gap-2 animate-fade-in">
                   <span className="material-symbols-outlined text-2xl text-on-surface-variant/50">inventory_2</span>
                   {menus.some(m => 
-                    (m.menu_date && m.menu_date.split('T')[0] === getWeekDaysWithDates().find(d => d.name === requirementDay)?.date) ||
-                    (!m.menu_date && m.day_of_week === requirementDay)
+                    m.menu_date && m.menu_date.split('T')[0] === getWeekDaysWithDates().find(d => d.name === requirementDay)?.date
                   ) ? (
                     <span className="text-green-700 font-bold not-italic flex items-center gap-1.5" style={{ color: '#15803d' }}>
                       <span className="material-symbols-outlined text-sm">check_circle</span>
@@ -1032,8 +1029,8 @@ export default function LogisticsMenus({ token }) {
 
                       <input
                         type="number"
-                        min="0.01"
-                        step="0.01"
+                        min="1"
+                        step="1"
                         value={item.quantity}
                         onChange={(e) => {
                           const updated = [...recipeItems];

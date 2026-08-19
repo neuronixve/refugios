@@ -32,6 +32,7 @@ import CarnetizacionPersonal from './pages/CarnetizacionPersonal';
 import PersonalList from './pages/PersonalList';
 import ConsolidatedReports from './pages/ConsolidatedReports';
 import Trazabilidad from './pages/Trazabilidad';
+import ComedorTrazabilidad from './pages/ComedorTrazabilidad';
 
 const hasAccess = (user, path, refugioId) => {
   if (!user) return false;
@@ -286,6 +287,7 @@ export default function App() {
   const LogisticsMenusWrapper = () => <LogisticsMenus token={token} />;
   const LogisticsAttendanceWrapper = () => <LogisticsAttendance token={token} />;
   const InventarioCocinaWrapper = () => <InventarioCocina token={token} user={user} />;
+  const ComedorTrazabilidadWrapper = () => <ComedorTrazabilidad token={token} />;
   const ReportsWrapper = () => user?.role === 'gerente'
     ? <ConsolidatedReports token={token} scopeRefugioId={selectedRefugio?.id} />
     : <Reports token={token} />;
@@ -367,6 +369,7 @@ export default function App() {
               <Route path="/refugio/:refugioId/comedor/menus" element={<ProtectedRoute element={<LogisticsMenusWrapper />} path="/refugio/:refugioId/comedor/menus" />} />
               <Route path="/refugio/:refugioId/comedor/asistencia" element={<ProtectedRoute element={<LogisticsAttendanceWrapper />} path="/refugio/:refugioId/comedor/asistencia" />} />
               <Route path="/refugio/:refugioId/comedor/inventario" element={<ProtectedRoute element={<InventarioCocinaWrapper />} path="/refugio/:refugioId/comedor/inventario" />} />
+              <Route path="/refugio/:refugioId/comedor/trazabilidad" element={<ProtectedRoute element={<ComedorTrazabilidadWrapper />} path="/refugio/:refugioId/comedor/trazabilidad" />} />
               
               <Route path="/refugio/:refugioId/logistica" element={<Navigate to={selectedRefugio ? `/refugio/${selectedRefugio.id}/comedor/panel` : '/sedes'} replace />} />
               

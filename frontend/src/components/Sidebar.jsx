@@ -284,6 +284,10 @@ export default function Sidebar({ user, selectedRefugio, onLogout, mobileOpen = 
                       <span className="material-symbols-outlined text-xs">kitchen</span>
                       <span>Inventario de Cocina</span>
                     </NavLink>
+                    <NavLink to={`/refugio/${selectedRefugio.id}/comedor/trazabilidad`} className={({ isActive }) => isActive ? subActiveClass : subInactiveClass}>
+                      <span className="material-symbols-outlined text-xs">analytics</span>
+                      <span>Trazabilidad y Reportes</span>
+                    </NavLink>
                   </div>
                 )}
               </div>

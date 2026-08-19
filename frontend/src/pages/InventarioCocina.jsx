@@ -177,7 +177,8 @@ export default function InventarioCocina({ token, user }) {
     const DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
     const todayName = DAYS[(new Date().getDay() + 6) % 7];
     let total = 0;
-    const todayMenus = menus.filter(m => m.day_of_week === todayName);
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayMenus = menus.filter(m => m.menu_date && m.menu_date.split('T')[0] === todayStr);
     todayMenus.forEach(m => {
       const parsed = parseIngredients(m.ingredients);
       const matched = parsed.find(p => normalizeName(p.name) === normalizeName(itemName));

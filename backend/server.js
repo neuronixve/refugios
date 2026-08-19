@@ -169,6 +169,7 @@ async function initDb() {
     await runMigration('drop unique_menu_per_day_meal constraint', 'ALTER TABLE menus DROP CONSTRAINT IF EXISTS unique_menu_per_day_meal');
     await runMigration('menus.unique_menu_weekly_default', 'CREATE UNIQUE INDEX IF NOT EXISTS unique_menu_weekly_default ON menus (refugio_id, day_of_week, meal_type) WHERE menu_date IS NULL');
     await runMigration('menus.unique_menu_by_date', 'CREATE UNIQUE INDEX IF NOT EXISTS unique_menu_by_date ON menus (refugio_id, menu_date, meal_type) WHERE menu_date IS NOT NULL');
+    await runMigration('clean up menus with null dates', 'DELETE FROM menus WHERE menu_date IS NULL');
     await runMigration('manual_meals_servings table', `
       CREATE TABLE IF NOT EXISTS manual_meals_servings (
         id SERIAL PRIMARY KEY,
@@ -3247,6 +3248,90 @@ app.get('/api/refugios/:refugio_id/meals/manual-servings/download', authenticate
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al generar Excel consolidado de comidas.' });
+  }
+});
+
+app.get('/api/refugios/:refugio_id/meals/consolidated-report', authenticateToken, async (req, res) => {
+  const { refugio_id } = req.params;
+  const { start_date, end_date } = req.query;
+
+  try {
+    const manualRes = await db.query(
+      `SELECT serving_date::date as date, meal_type, person_type, SUM(quantity)::int as quantity 
+       FROM manual_meals_servings 
+       WHERE refugio_id = $1 AND ($2::date IS NULL OR serving_date >= $2) AND ($3::date IS NULL OR serving_date <= $3)
+       GROUP BY serving_date, meal_type, person_type`,
+      [parseInt(refugio_id), start_date || null, end_date || null]
+    );
+
+    const scannedRes = await db.query(
+      `SELECT meal_date::date as date, meal_type, 'Afectados' as person_type, COUNT(*)::int as quantity
+       FROM meal_attendance
+       WHERE refugio_id = $1 AND resident_id IS NOT NULL AND ($2::date IS NULL OR meal_date >= $2) AND ($3::date IS NULL OR meal_date <= $3)
+       GROUP BY meal_date, meal_type`,
+      [parseInt(refugio_id), start_date || null, end_date || null]
+    );
+
+    const scannedStaff = await db.query(
+      `SELECT ma.meal_date::date as date, ma.meal_type, 
+              CASE 
+                WHEN u.role = 'medico' THEN 'Medicos'
+                WHEN u.role = 'cocina' THEN 'Cocineras'
+                WHEN u.role = 'seguridad' THEN 'Vigilantes'
+                ELSE 'Administrativos'
+              END as person_type, 
+              COUNT(*)::int as quantity
+       FROM meal_attendance ma
+       JOIN users u ON ma.staff_id = u.id
+       WHERE ma.refugio_id = $1 AND ma.staff_id IS NOT NULL AND ($2::date IS NULL OR ma.meal_date >= $2) AND ($3::date IS NULL OR ma.meal_date <= $3)
+       GROUP BY ma.meal_date, ma.meal_type, u.role`,
+      [parseInt(refugio_id), start_date || null, end_date || null]
+    );
+
+    const data = {};
+    const addRow = (dateStr, mealType, personType, quantity) => {
+      const key = `${dateStr}_${mealType}`;
+      if (!data[key]) {
+        data[key] = {
+          date: dateStr,
+          meal_type: mealType,
+          'Afectados': 0,
+          'Guardia Nacional': 0,
+          'CICPC': 0,
+          'Vigilantes': 0,
+          'Medicos': 0,
+          'Administrativos': 0,
+          'Comite': 0,
+          'Cocineras': 0,
+          'Juventud': 0,
+          'SAREN': 0,
+          'Otros': 0
+        };
+      }
+      data[key][personType] = (data[key][personType] || 0) + quantity;
+    };
+
+    const formatDate = dVal => {
+      const d = new Date(dVal);
+      const year = d.getUTCFullYear();
+      const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    manualRes.rows.forEach(r => addRow(formatDate(r.date), r.meal_type, r.person_type, r.quantity));
+    scannedRes.rows.forEach(r => addRow(formatDate(r.date), r.meal_type, r.person_type, r.quantity));
+    scannedStaff.rows.forEach(r => addRow(formatDate(r.date), r.meal_type, r.person_type, r.quantity));
+
+    const rows = Object.values(data).sort((a, b) => {
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
+      return a.meal_type.localeCompare(b.meal_type);
+    });
+
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener reporte consolidado de comidas.' });
   }
 });
 
