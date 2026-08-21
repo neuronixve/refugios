@@ -20,7 +20,8 @@ export default function InventarioCocina({ token, user }) {
   const [editingItemId, setEditingItemId] = useState(null);
 
   // Form Fields
-  const [itemName, setItemName] = useState('');
+  const [itemName, setItemNameState] = useState('');
+  const setItemName = (val) => setItemNameState(val.toUpperCase());
   const [quantity, setQuantity] = useState(0);
   const [minThreshold, setMinThreshold] = useState(5);
   const [unit, setUnit] = useState('Unidades');
@@ -314,14 +315,7 @@ export default function InventarioCocina({ token, user }) {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      {/* Printable header with logos, visible only during printing */}
-      <div className="print-header-logos">
-        <img src="/campamento-logo-transparente.png" alt="Campamento Logo" className="h-10 object-contain" />
-        <h2 className="text-xs font-black text-[#0b2347] uppercase tracking-wider text-center flex-1">
-          Inventario de Cocina
-        </h2>
-        <img src="/logo-saren.png" alt="Saren Logo" className="h-8 object-contain" />
-      </div>
+
       {/* Header */}
       <header className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -430,7 +424,7 @@ export default function InventarioCocina({ token, user }) {
                   const isCritical = qtyVal <= minVal;
                   return (
                     <tr key={item.id} className="border-b border-outline-variant/30 hover:bg-surface-container-low transition-all">
-                      <td className="py-4 pl-2 font-bold text-on-surface">{item.item_name}</td>
+                      <td className="py-4 pl-2 font-bold text-on-surface">{(item.item_name || '').toUpperCase()}</td>
                       <td className="py-4 text-center font-bold font-mono text-primary text-sm">{qtyVal}</td>
                       <td className="py-4 text-center font-bold font-mono text-amber-700 text-sm">{committed > 0 ? committed : '0'}</td>
                       <td className={`py-4 text-center font-bold font-mono text-sm ${available < 0 ? 'text-error' : 'text-success'}`}>{available}</td>

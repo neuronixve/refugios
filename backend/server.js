@@ -184,6 +184,102 @@ async function initDb() {
       )
     `);
     await runMigration('warehouse_requests.menu_date', 'ALTER TABLE warehouse_requests ADD COLUMN IF NOT EXISTS menu_date DATE');
+
+    // Consolidate depositos to DEPOSITO DE COCINA, DEPOSITO DE SALUD, DEPOSITO GENERAL
+    await (async () => {
+      try {
+        console.log("Iniciando migración de depósitos a: DEPOSITO DE COCINA, DEPOSITO DE SALUD, DEPOSITO GENERAL...");
+        const refugiosRes = await db.query("SELECT id FROM refugios");
+        for (const r of refugiosRes.rows) {
+          const refugioId = r.id;
+
+          // 1. Ensure DEPOSITO DE COCINA exists
+          let cocinaRes = await db.query(
+            "SELECT id FROM depositos WHERE refugio_id = $1 AND name = 'DEPOSITO DE COCINA'",
+            [refugioId]
+          );
+          let cocinaId;
+          if (cocinaRes.rows.length > 0) {
+            cocinaId = cocinaRes.rows[0].id;
+          } else {
+            const insRes = await db.query(
+              "INSERT INTO depositos (refugio_id, name, description, capacity_percent) VALUES ($1, 'DEPOSITO DE COCINA', 'Inventario local de cocina para raciones diarias', 100) RETURNING id",
+              [refugioId]
+            );
+            cocinaId = insRes.rows[0].id;
+          }
+
+          // 2. Ensure DEPOSITO DE SALUD exists
+          let saludRes = await db.query(
+            "SELECT id FROM depositos WHERE refugio_id = $1 AND name = 'DEPOSITO DE SALUD'",
+            [refugioId]
+          );
+          let saludId;
+          if (saludRes.rows.length > 0) {
+            saludId = saludRes.rows[0].id;
+          } else {
+            const insRes = await db.query(
+              "INSERT INTO depositos (refugio_id, name, description, capacity_percent) VALUES ($1, 'DEPOSITO DE SALUD', 'Inventario local del servicio médico para insumos de salud', 100) RETURNING id",
+              [refugioId]
+            );
+            saludId = insRes.rows[0].id;
+          }
+
+          // 3. Ensure DEPOSITO GENERAL exists
+          let generalRes = await db.query(
+            "SELECT id FROM depositos WHERE refugio_id = $1 AND name = 'DEPOSITO GENERAL'",
+            [refugioId]
+          );
+          let generalId;
+          if (generalRes.rows.length > 0) {
+            generalId = generalRes.rows[0].id;
+          } else {
+            const insRes = await db.query(
+              "INSERT INTO depositos (refugio_id, name, description, capacity_percent) VALUES ($1, 'DEPOSITO GENERAL', 'Inventario central de insumos del campamento', 100) RETURNING id",
+              [refugioId]
+            );
+            generalId = insRes.rows[0].id;
+          }
+
+          // 4. Migrate inventory items
+          await db.query(
+            "UPDATE inventory SET deposito_id = $1 WHERE refugio_id = $2 AND category = 'Alimentos'",
+            [cocinaId, refugioId]
+          );
+          await db.query(
+            "UPDATE inventory SET deposito_id = $1 WHERE refugio_id = $2 AND category IN ('Medicinas', 'Equipos Medicos')",
+            [saludId, refugioId]
+          );
+          await db.query(
+            "UPDATE inventory SET deposito_id = $1 WHERE refugio_id = $2 AND category NOT IN ('Alimentos', 'Medicinas', 'Equipos Medicos')",
+            [generalId, refugioId]
+          );
+
+          // 5. Migrate inventory movements
+          await db.query(
+            "UPDATE inventory_movements SET deposito_id = $1, deposito_name = 'DEPOSITO DE COCINA' WHERE refugio_id = $2 AND inventory_type = 'cocina'",
+            [cocinaId, refugioId]
+          );
+          await db.query(
+            "UPDATE inventory_movements SET deposito_id = $1, deposito_name = 'DEPOSITO DE SALUD' WHERE refugio_id = $2 AND inventory_type = 'salud'",
+            [saludId, refugioId]
+          );
+          await db.query(
+            "UPDATE inventory_movements SET deposito_id = $1, deposito_name = 'DEPOSITO GENERAL' WHERE refugio_id = $2 AND inventory_type = 'almacen'",
+            [generalId, refugioId]
+          );
+
+          // 6. Delete all old depositos for this shelter that are not these three
+          await db.query(
+            "DELETE FROM depositos WHERE refugio_id = $1 AND id NOT IN ($2, $3, $4)",
+            [refugioId, cocinaId, saludId, generalId]
+          );
+        }
+        console.log("Migración de depósitos completada exitosamente.");
+      } catch (err) {
+        console.error("Error en migración de depósitos:", err);
+      }
+    })();
     
     console.log('Migraciones dinámicas verificadas y aplicadas.');
   } catch (err) {
@@ -1706,13 +1802,7 @@ async function getOrCreateHealthDeposito(queryable, refugioId) {
   const existing = await queryable.query(
     `SELECT d.*
      FROM depositos d
-     WHERE d.refugio_id = $1
-       AND (
-         LOWER(COALESCE(d.name, '')) LIKE '%médico%'
-         OR LOWER(COALESCE(d.name, '')) LIKE '%medico%'
-         OR LOWER(COALESCE(d.name, '')) LIKE '%salud%'
-       )
-     ORDER BY d.id ASC
+     WHERE d.refugio_id = $1 AND d.name = 'DEPOSITO DE SALUD'
      LIMIT 1`,
     [parseInt(refugioId)]
   );
@@ -1720,7 +1810,7 @@ async function getOrCreateHealthDeposito(queryable, refugioId) {
 
   const created = await queryable.query(
     `INSERT INTO depositos (refugio_id, name, description, capacity_percent)
-     VALUES ($1, 'Servicio Médico', 'Depósito local del servicio médico para insumos de salud', 100)
+     VALUES ($1, 'DEPOSITO DE SALUD', 'Inventario local del servicio médico para insumos de salud', 100)
      RETURNING *`,
     [parseInt(refugioId)]
   );
@@ -2105,6 +2195,7 @@ app.post('/api/refugios/:refugio_id/inventory', authenticateToken, denyMedicalGe
   }
 
   try {
+    const cleanItemName = item_name.trim().toUpperCase();
     const qtyVal = parseFloat(quantity) || 0;
     const minVal = parseFloat(min_threshold) || 0;
     const status = qtyVal === 0 ? 'Sin Stock' : (qtyVal <= minVal ? 'Stock Crítico' : 'Stock Suficiente');
@@ -2126,7 +2217,7 @@ app.post('/api/refugios/:refugio_id/inventory', authenticateToken, denyMedicalGe
              min_threshold = EXCLUDED.min_threshold, unit = EXCLUDED.unit, status = EXCLUDED.status, 
              deposito_id = EXCLUDED.deposito_id, units_per_package = EXCLUDED.units_per_package, sub_unit = EXCLUDED.sub_unit, updated_at = NOW()
          RETURNING *`,
-        [parseInt(id), parseInt(refugio_id), item_name, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null, units_per_package || 1, sub_unit || null]
+        [parseInt(id), parseInt(refugio_id), cleanItemName, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null, units_per_package || 1, sub_unit || null]
       );
 
       const diff = qtyVal - oldQty;
@@ -2135,7 +2226,7 @@ app.post('/api/refugios/:refugio_id/inventory', authenticateToken, denyMedicalGe
         await logInventoryMovement(db, {
           refugio_id,
           inventory_id: id,
-          item_name,
+          item_name: cleanItemName,
           category,
           deposito_id,
           inventory_type,
@@ -2152,14 +2243,14 @@ app.post('/api/refugios/:refugio_id/inventory', authenticateToken, denyMedicalGe
         `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id, units_per_package, sub_unit)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING *`,
-        [parseInt(refugio_id), item_name, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null, units_per_package || 1, sub_unit || null]
+        [parseInt(refugio_id), cleanItemName, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null, units_per_package || 1, sub_unit || null]
       );
       const newId = result.rows[0].id;
       const inventory_type = category === 'Alimentos' ? 'cocina' : (category === 'Medicinas' ? 'salud' : 'almacen');
       await logInventoryMovement(db, {
         refugio_id,
         inventory_id: newId,
-        item_name,
+        item_name: cleanItemName,
         category,
         deposito_id,
         inventory_type,
@@ -3518,7 +3609,7 @@ app.post('/api/donations', authenticateToken, async (req, res) => {
     // 3. If donation is assigned to a shelter, sync items to inventory
     if (refugio_id) {
       for (const item of items) {
-        const item_name = item.name;
+        const item_name = (item.name || '').trim().toUpperCase();
         const category = item.category || 'Donación';
         const quantity = parseFloat(item.quantity) || 0;
         const unit = item.unit || 'unidades';
@@ -3529,48 +3620,49 @@ app.post('/api/donations', authenticateToken, async (req, res) => {
         // Auto-routing logic based on category
         if (category === 'Alimentos') {
           const depRes = await db.query(
-            "SELECT id FROM depositos WHERE refugio_id = $1 AND name ILIKE '%cocina%' LIMIT 1",
+            "SELECT id FROM depositos WHERE refugio_id = $1 AND name = 'DEPOSITO DE COCINA' LIMIT 1",
             [refugio_id]
           );
           if (depRes.rows.length > 0) {
             targetDepId = depRes.rows[0].id;
           } else {
             const createDep = await db.query(
-              "INSERT INTO depositos (refugio_id, name, capacity_percent) VALUES ($1, 'Cocina', 0) RETURNING id",
+              "INSERT INTO depositos (refugio_id, name, capacity_percent) VALUES ($1, 'DEPOSITO DE COCINA', 0) RETURNING id",
               [refugio_id]
             );
             targetDepId = createDep.rows[0].id;
           }
-          targetDepName = 'Cocina';
-        } else if (category === 'Medicinas') {
+          targetDepName = 'DEPOSITO DE COCINA';
+        } else if (category === 'Medicinas' || category === 'Equipos Medicos') {
           const depRes = await db.query(
-            "SELECT id FROM depositos WHERE refugio_id = $1 AND (name ILIKE '%medico%' OR name ILIKE '%médico%' OR name ILIKE '%salud%') LIMIT 1",
+            "SELECT id FROM depositos WHERE refugio_id = $1 AND name = 'DEPOSITO DE SALUD' LIMIT 1",
             [refugio_id]
           );
           if (depRes.rows.length > 0) {
             targetDepId = depRes.rows[0].id;
           } else {
             const createDep = await db.query(
-              "INSERT INTO depositos (refugio_id, name, capacity_percent) VALUES ($1, 'Servicio Médico', 0) RETURNING id",
+              "INSERT INTO depositos (refugio_id, name, capacity_percent) VALUES ($1, 'DEPOSITO DE SALUD', 0) RETURNING id",
               [refugio_id]
             );
             targetDepId = createDep.rows[0].id;
           }
-          targetDepName = 'Servicio Médico';
-        } else if (destination_warehouse) {
+          targetDepName = 'DEPOSITO DE SALUD';
+        } else {
           const depRes = await db.query(
-            'SELECT id FROM depositos WHERE refugio_id = $1 AND LOWER(name) = LOWER($2)',
-            [refugio_id, destination_warehouse.trim()]
+            "SELECT id FROM depositos WHERE refugio_id = $1 AND name = 'DEPOSITO GENERAL' LIMIT 1",
+            [refugio_id]
           );
           if (depRes.rows.length > 0) {
             targetDepId = depRes.rows[0].id;
           } else {
             const createDep = await db.query(
-              'INSERT INTO depositos (refugio_id, name, capacity_percent) VALUES ($1, $2, 0) RETURNING id',
-              [refugio_id, destination_warehouse.trim()]
+              "INSERT INTO depositos (refugio_id, name, capacity_percent) VALUES ($1, 'DEPOSITO GENERAL', 0) RETURNING id",
+              [refugio_id]
             );
             targetDepId = createDep.rows[0].id;
           }
+          targetDepName = 'DEPOSITO GENERAL';
         }
 
         // Check if item exists in inventory for this refugio and depósito
@@ -3923,9 +4015,9 @@ app.get('/api/refugios/:refugioId/depositos', authenticateToken, async (req, res
     // Semillar si está vacío
     if (result.rows.length === 0) {
       const defaults = [
-        { name: 'Depósito Central', description: 'Zona Industrial. Almacén principal de alta capacidad.', capacity_percent: 85 },
-        { name: 'Depósito Norte', description: 'Hub de reabastecimiento rápido de insumos.', capacity_percent: 42 },
-        { name: 'Depósito Este', description: 'Depósito intermedio para distribución local.', capacity_percent: 12 }
+        { name: 'DEPOSITO GENERAL', description: 'Inventario central de insumos del campamento.', capacity_percent: 100 },
+        { name: 'DEPOSITO DE COCINA', description: 'Inventario local de cocina para raciones diarias.', capacity_percent: 100 },
+        { name: 'DEPOSITO DE SALUD', description: 'Inventario local del servicio médico para insumos de salud.', capacity_percent: 100 }
       ];
       for (const d of defaults) {
         await db.query(

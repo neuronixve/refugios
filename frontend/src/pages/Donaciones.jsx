@@ -17,8 +17,11 @@ export default function Donaciones({ token }) {
 
   // Items list state
   const [items, setItems] = useState([
-    { name: '', category: 'Medicinas', quantity: 0, unit: 'Cajas', lot: '', expiration: '', refrigeration: false }
+    { name: '', category: 'Alimentos', quantity: 1, unit: 'Kilos', lot: '', expiration: '', refrigeration: false }
   ]);
+
+  const [inventory, setInventory] = useState([]);
+  const [focusedIndex, setFocusedIndex] = useState(null);
 
   // Destination deposit selection (dynamic)
   const [depositos, setDepositos] = useState([]);
@@ -36,12 +39,8 @@ export default function Donaciones({ token }) {
     : 'https://api.venezuelarenacera.com/api');
 
   const searchDonors = async (query) => {
-    if (!query || query.trim().length < 2) {
-      setDonorSuggestions([]);
-      return;
-    }
     try {
-      const res = await fetch(`${API_BASE}/donors?search=${encodeURIComponent(query)}`, {
+      const res = await fetch(`${API_BASE}/donors?search=${encodeURIComponent(query || '')}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -53,9 +52,9 @@ export default function Donaciones({ token }) {
   };
 
   const handleSelectDonor = (donor) => {
-    setDonorName(donor.name);
-    setOrganization(donor.organization || '');
-    setDonorRif(donor.rif);
+    setDonorName((donor.name || '').toUpperCase());
+    setOrganization((donor.organization || '').toUpperCase());
+    setDonorRif((donor.rif || '').toUpperCase());
     setPhone(donor.phone || '');
     setShowSuggestions(false);
   };
@@ -63,7 +62,34 @@ export default function Donaciones({ token }) {
   useEffect(() => {
     fetchRecentDonations();
     fetchDepositos();
+    fetchInventory();
   }, [refugioId]);
+
+  useEffect(() => {
+    if (items && items.length > 0) {
+      const cat = items[0].category;
+      if (cat === 'Alimentos') {
+        setWarehouse('DEPOSITO DE COCINA');
+      } else if (cat === 'Medicinas' || cat === 'Equipos Medicos') {
+        setWarehouse('DEPOSITO DE SALUD');
+      } else {
+        setWarehouse('DEPOSITO GENERAL');
+      }
+    }
+  }, [items]);
+
+  const fetchInventory = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/refugios/${refugioId}/inventory`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setInventory(await res.json());
+      }
+    } catch (err) {
+      console.error("Error fetching inventory:", err);
+    }
+  };
 
   const fetchRecentDonations = async () => {
     setLoading(true);
@@ -177,7 +203,7 @@ export default function Donaciones({ token }) {
         setDonorRif('');
         setPhone('');
         setDonorSuggestions([]);
-        setItems([{ name: '', category: 'Medicinas', quantity: 0, unit: 'Cajas', lot: '', expiration: '', refrigeration: false }]);
+        setItems([{ name: '', category: 'Alimentos', quantity: 1, unit: 'Kilos', lot: '', expiration: '', refrigeration: false }]);
         if (depositos.length > 0) {
           setWarehouse(depositos[0].name);
         }
@@ -199,6 +225,60 @@ export default function Donaciones({ token }) {
   // Stats calculators
   const totalQuantity = items.reduce((acc, curr) => acc + (parseInt(curr.quantity) || 0), 0);
   const totalCategories = [...new Set(items.map(item => item.category))].length;
+
+  const getSuggestionsForItem = (item) => {
+    if (!inventory || inventory.length === 0) return [];
+    
+    let filtered = [];
+    const cat = item.category;
+    
+    if (cat === 'Alimentos') {
+      filtered = inventory.filter(inv => {
+        const depName = (inv.deposito_name || '').toLowerCase();
+        return depName.includes('cocina');
+      });
+    } else if (cat === 'Medicinas') {
+      filtered = inventory.filter(inv => {
+        const depName = (inv.deposito_name || '').toLowerCase();
+        const isHealthDep = depName.includes('medico') || depName.includes('médico') || depName.includes('salud');
+        return isHealthDep && inv.category === 'Medicinas';
+      });
+    } else if (cat === 'Equipos Medicos') {
+      filtered = inventory.filter(inv => {
+        const depName = (inv.deposito_name || '').toLowerCase();
+        const isHealthDep = depName.includes('medico') || depName.includes('médico') || depName.includes('salud');
+        return isHealthDep && inv.category === 'Equipos Medicos';
+      });
+    } else {
+      filtered = inventory.filter(inv => {
+        const depName = (inv.deposito_name || '').toLowerCase();
+        const isKitchen = depName.includes('cocina');
+        const isHealth = depName.includes('medico') || depName.includes('médico') || depName.includes('salud');
+        return !isKitchen && !isHealth;
+      });
+    }
+
+    const query = (item.name || '').toLowerCase().trim();
+    if (query) {
+      filtered = filtered.filter(inv => 
+        (inv.item_name || '').toLowerCase().includes(query)
+      );
+    }
+    
+    return filtered
+      .sort((a, b) => (a.item_name || '').localeCompare(b.item_name || ''))
+      .slice(0, 8);
+  };
+
+  const handleSelectSuggestion = (index, name, unit) => {
+    const updated = [...items];
+    updated[index].name = name;
+    if (unit) {
+      updated[index].unit = unit;
+    }
+    setItems(updated);
+    setFocusedIndex(null);
+  };
 
   const getUnitOptions = (category) => {
     switch (category) {
@@ -355,6 +435,13 @@ export default function Donaciones({ token }) {
                     searchDonors(val);
                     setShowSuggestions(true);
                   }}
+                  onFocus={() => {
+                    searchDonors(donorName);
+                    setShowSuggestions(true);
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setShowSuggestions(false), 250);
+                  }}
                   placeholder="Ej. ROBERTO JIMÉNEZ"
                   className="bg-surface-container border border-outline-variant rounded-xl px-3 py-2.5 text-xs focus:outline-none"
                   required
@@ -363,19 +450,22 @@ export default function Donaciones({ token }) {
                   <div className="absolute top-full left-0 right-0 bg-surface border border-outline-variant rounded-xl shadow-lg z-50 max-h-48 overflow-y-auto mt-1">
                     <div className="flex justify-between items-center bg-surface-container-low px-2 py-1 border-b border-outline-variant/35 text-[9px] font-bold text-on-surface-variant">
                       <span>DONANTES REGISTRADOS</span>
-                      <button type="button" onClick={() => setShowSuggestions(false)} className="text-error bg-transparent border-0 cursor-pointer">Cerrar</button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setShowSuggestions(false)} className="text-error bg-transparent border-0 cursor-pointer">Cerrar</button>
                     </div>
                     {donorSuggestions.map(d => (
                       <div 
                         key={d.id}
-                        onClick={() => handleSelectDonor(d)}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleSelectDonor(d);
+                        }}
                         className="p-2.5 hover:bg-primary/10 cursor-pointer border-b border-outline-variant/10 text-xs text-on-surface flex justify-between items-center"
                       >
                         <div>
-                          <p className="font-black text-on-surface">{d.name}</p>
-                          <p className="text-[10px] text-on-surface-variant">{d.organization || 'Sin Organización'}</p>
+                          <p className="font-black text-on-surface">{(d.name || '').toUpperCase()}</p>
+                          <p className="text-[10px] text-on-surface-variant">{(d.organization || 'Sin Organización').toUpperCase()}</p>
                         </div>
-                        <span className="font-mono text-primary font-bold text-[10px]">{d.rif}</span>
+                        <span className="font-mono text-primary font-bold text-[10px]">{(d.rif || '').toUpperCase()}</span>
                       </div>
                     ))}
                   </div>
@@ -392,6 +482,13 @@ export default function Donaciones({ token }) {
                     setDonorRif(val);
                     searchDonors(val);
                     setShowSuggestions(true);
+                  }}
+                  onFocus={() => {
+                    searchDonors(donorRif);
+                    setShowSuggestions(true);
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setShowSuggestions(false), 250);
                   }}
                   placeholder="Ej. V123456789 o J312345678"
                   className="bg-surface-container border border-outline-variant rounded-xl px-3 py-2.5 text-xs focus:outline-none font-mono"
@@ -447,15 +544,34 @@ export default function Donaciones({ token }) {
                   
                   {/* Primary Item Row */}
                   <div className="grid grid-cols-12 gap-3 items-end">
-                    <div className="col-span-12 md:col-span-5 flex flex-col gap-1 text-xs">
+                    <div className="col-span-12 md:col-span-5 flex flex-col gap-1 text-xs relative">
                       <label className="font-bold text-on-surface-variant">Nombre del Artículo *</label>
                       <input 
                         type="text" 
                         value={item.name}
-                        onChange={(e) => handleUpdateItem(index, 'name', e.target.value)}
-                        placeholder="Ej. Amoxicilina 500mg o Kit Higiene"
+                        onChange={(e) => handleUpdateItem(index, 'name', e.target.value.toUpperCase())}
+                        onFocus={() => setFocusedIndex(index)}
+                        onBlur={() => setTimeout(() => setFocusedIndex(null), 250)}
+                        placeholder="Ej. AMOXICILINA 500MG"
                         className="bg-surface-container-lowest border border-outline-variant rounded-xl px-3 py-2 text-xs focus:outline-none"
                       />
+                      {focusedIndex === index && getSuggestionsForItem(item).length > 0 && (
+                        <div className="absolute top-full left-0 right-0 bg-surface border border-outline-variant rounded-xl shadow-lg z-50 max-h-48 overflow-y-auto mt-1">
+                          <div className="bg-surface-container-low px-2 py-1 border-b border-outline-variant/35 text-[9px] font-bold text-on-surface-variant">
+                            <span>ARTÍCULOS EN INVENTARIO ({item.category === 'Alimentos' ? 'COCINA' : (item.category === 'Medicinas' || item.category === 'Equipos Medicos') ? 'SALUD' : 'ALMACÉN'})</span>
+                          </div>
+                          {getSuggestionsForItem(item).map((s, idx) => (
+                            <div 
+                              key={idx}
+                              onMouseDown={() => handleSelectSuggestion(index, s.item_name.toUpperCase(), s.unit)}
+                              className="p-2 hover:bg-primary/10 cursor-pointer border-b border-outline-variant/10 text-xs text-on-surface flex justify-between items-center"
+                            >
+                              <span className="font-bold">{(s.item_name || '').toUpperCase()}</span>
+                              <span className="text-[9px] text-primary bg-primary/5 px-1 py-0.5 rounded font-black">{s.unit || 'uds'}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     <div className="col-span-6 md:col-span-3 flex flex-col gap-1 text-xs">
@@ -465,15 +581,15 @@ export default function Donaciones({ token }) {
                         onChange={(e) => handleUpdateItem(index, 'category', e.target.value)}
                         className="bg-surface-container-lowest border border-outline-variant rounded-xl px-3 py-2 text-xs focus:outline-none font-bold"
                       >
-                        <option value="Medicinas">Medicinas</option>
                         <option value="Alimentos">Alimentos</option>
-                        <option value="Equipos Medicos">Equipos Médicos</option>
-                        <option value="Mobiliario">Mobiliario</option>
-                        <option value="Equipos Tecnologicos">Equipos Tecnológicos</option>
                         <option value="Articulos de Cocina">Artículos de Cocina</option>
-                        <option value="Aseo Personal">Aseo Personal</option>
                         <option value="Articulos de Limpieza">Artículos de Limpieza</option>
+                        <option value="Aseo Personal">Aseo Personal</option>
                         <option value="Camas/Colchones">Camas/Colchones</option>
+                        <option value="Equipos Medicos">Equipos Médicos</option>
+                        <option value="Equipos Tecnologicos">Equipos Tecnológicos</option>
+                        <option value="Medicinas">Medicinas</option>
+                        <option value="Mobiliario">Mobiliario</option>
                         <option value="Ropa">Ropa</option>
                         <option value="Otros">Otros</option>
                       </select>

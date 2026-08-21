@@ -109,7 +109,8 @@ export default function Inventory({ token, tab }) {
   // Item Form State
   const [showItemModal, setShowItemModal] = useState(false);
   const [itemId, setItemId] = useState('');
-  const [itemName, setItemName] = useState('');
+  const [itemName, setItemNameState] = useState('');
+  const setItemName = (val) => setItemNameState(val.toUpperCase());
   const [category, setCategory] = useState('Alimentos');
   const [quantity, setQuantity] = useState(10);
   const [minThreshold, setMinThreshold] = useState(5);
@@ -474,14 +475,7 @@ export default function Inventory({ token, tab }) {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      {/* Printable header with logos, visible only during printing */}
-      <div className="print-header-logos">
-        <img src="/campamento-logo-transparente.png" alt="Campamento Logo" className="h-10 object-contain" />
-        <h2 className="text-xs font-black text-[#0b2347] uppercase tracking-wider text-center flex-1">
-          Inventario General de Almacén
-        </h2>
-        <img src="/logo-saren.png" alt="Saren Logo" className="h-8 object-contain" />
-      </div>
+
       {/* Header */}
       <header className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -620,7 +614,7 @@ export default function Inventory({ token, tab }) {
                       const status = item.quantity === 0 ? 'Sin Stock' : (item.quantity <= item.min_threshold ? 'Stock Crítico' : 'Stock Suficiente');
                       return (
                         <tr key={idx} className="border-b border-outline-variant hover:bg-surface-container/30 transition-colors">
-                          <td className="py-3 px-4 font-bold text-primary">{item.item_name}</td>
+                          <td className="py-3 px-4 font-bold text-primary">{(item.item_name || '').toUpperCase()}</td>
                           <td className="py-3 px-4 text-on-surface-variant">{item.category}</td>
                           <td className="py-3 px-4 text-center font-bold font-mono text-sm">{item.quantity} {item.unit}</td>
                           <td className="py-3 px-4 text-center text-on-surface-variant">{item.min_threshold} {item.unit}</td>
@@ -850,7 +844,7 @@ export default function Inventory({ token, tab }) {
                               <option value="">-- Seleccionar --</option>
                               {deliverableInventory.map(i => (
                                 <option key={i.id} value={i.item_name} disabled={i.quantity <= 0}>
-                                  {i.item_name} {i.quantity <= 0 ? '(Agotado)' : ''}
+                                  {(i.item_name || '').toUpperCase()} {i.quantity <= 0 ? '(Agotado)' : ''}
                                 </option>
                               ))}
                             </select>
@@ -1086,7 +1080,7 @@ export default function Inventory({ token, tab }) {
                   deliveries.map((d) => (
                     <tr key={d.id} className="border-b border-outline-variant hover:bg-surface-container/30 transition-colors">
                       <td className="py-3 px-4 font-bold text-primary">{d.resident_name}</td>
-                      <td className="py-3 px-4 text-on-surface-variant">{d.item_name}</td>
+                      <td className="py-3 px-4 text-on-surface-variant">{(d.item_name || '').toUpperCase()}</td>
                       <td className="py-3 px-4 text-center font-semibold">{d.quantity}</td>
                       <td className="py-3 px-4 text-on-surface-variant">{d.delivered_at}</td>
                     </tr>
@@ -1240,7 +1234,7 @@ export default function Inventory({ token, tab }) {
                   {selectedResidentHistory.length > 0 ? (
                     selectedResidentHistory.map((d) => (
                       <tr key={d.id} className="border-b border-outline-variant/30 hover:bg-surface-container-low transition-colors">
-                        <td className="py-2.5 px-4 font-bold text-primary">{d.item_name}</td>
+                        <td className="py-2.5 px-4 font-bold text-primary">{(d.item_name || '').toUpperCase()}</td>
                         <td className="py-2.5 px-4 text-center font-semibold">{d.quantity}</td>
                         <td className="py-2.5 px-4 text-on-surface-variant">{d.delivered_at}</td>
                       </tr>

@@ -20,7 +20,8 @@ export default function InventarioSalud({ token }) {
   const [editingItemId, setEditingItemId] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const [itemName, setItemName] = useState('');
+  const [itemName, setItemNameState] = useState('');
+  const setItemName = (val) => setItemNameState(val.toUpperCase());
   const [quantity, setQuantity] = useState(0);
   const [minThreshold, setMinThreshold] = useState(5);
   const [unit, setUnit] = useState('Unidades');
@@ -216,14 +217,7 @@ export default function InventarioSalud({ token }) {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      {/* Printable header with logos, visible only during printing */}
-      <div className="print-header-logos">
-        <img src="/campamento-logo-transparente.png" alt="Campamento Logo" className="h-10 object-contain" />
-        <h2 className="text-xs font-black text-[#0b2347] uppercase tracking-wider text-center flex-1">
-          Inventario de Salud
-        </h2>
-        <img src="/logo-saren.png" alt="Saren Logo" className="h-8 object-contain" />
-      </div>
+
       <header className="mb-8 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
         <div>
           <h2 className="text-2xl font-extrabold text-[#0b2347] uppercase leading-none">Inventario de Salud</h2>
@@ -327,7 +321,7 @@ export default function InventarioSalud({ token }) {
                     const isCritical = qty <= min;
                     return (
                       <tr key={item.id} className="border-b border-outline-variant/30 hover:bg-surface-container-low transition-all">
-                        <td className="py-4 pl-2 font-bold text-on-surface">{item.item_name}</td>
+                        <td className="py-4 pl-2 font-bold text-on-surface">{(item.item_name || '').toUpperCase()}</td>
                         <td className="py-4 text-center font-mono">
                           <span className="font-bold text-primary text-sm block">{parseFloat(item.quantity)}</span>
                           {item.units_per_package > 1 && item.sub_unit && (
