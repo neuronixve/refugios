@@ -875,9 +875,10 @@ export default function LogisticsMenus({ token }) {
                     <label className="text-[9px] font-black text-on-surface-variant uppercase block mb-1">Cant.</label>
                     <input 
                       type="number" 
+                      step="0.01"
+                      min="0.01"
                       value={customItemQty} 
-                      onChange={e => setCustomItemQty(parseInt(e.target.value) || 1)} 
-                      min="1" 
+                      onChange={e => setCustomItemQty(e.target.value)} 
                       className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                       required
                     />
@@ -1029,12 +1030,12 @@ export default function LogisticsMenus({ token }) {
 
                       <input
                         type="number"
-                        min="1"
-                        step="1"
+                        min="0.01"
+                        step="0.01"
                         value={item.quantity}
                         onChange={(e) => {
                           const updated = [...recipeItems];
-                          updated[index].quantity = parseFloat(e.target.value) || 0;
+                          updated[index].quantity = e.target.value;
                           setRecipeItems(updated);
                         }}
                         className="w-16 bg-surface-container-low border border-outline-variant rounded-lg p-2 text-xs text-center font-black"

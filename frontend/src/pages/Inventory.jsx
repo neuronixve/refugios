@@ -877,10 +877,11 @@ export default function Inventory({ token, tab }) {
                           <td className="py-3 px-2">
                             <input 
                               type="number" 
+                              step="0.01"
+                              min="0.01"
                               value={dItem.quantity}
-                              min="1"
                               max={currentInvItem ? currentInvItem.quantity : 100}
-                              onChange={(e) => handleUpdateDeliveryRow(index, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
+                              onChange={(e) => handleUpdateDeliveryRow(index, 'quantity', e.target.value)}
                               className="bg-surface-container-lowest border border-outline-variant rounded-lg p-2 text-xs focus:outline-none w-16 text-center font-bold"
                             />
                           </td>
@@ -1187,6 +1188,7 @@ export default function Inventory({ token, tab }) {
                   onChange={(e) => setMinThreshold(e.target.value)} 
                   className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                   min="0"
+                  step="0.01"
                   required
                 />
               </div>

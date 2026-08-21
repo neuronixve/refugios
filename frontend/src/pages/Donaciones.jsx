@@ -599,8 +599,10 @@ export default function Donaciones({ token }) {
                       <label className="font-bold text-on-surface-variant">Cantidad</label>
                       <input 
                         type="number" 
+                        step="0.01"
+                        min="0.01"
                         value={item.quantity}
-                        onChange={(e) => handleUpdateItem(index, 'quantity', Math.max(0, parseInt(e.target.value) || 0))}
+                        onChange={(e) => handleUpdateItem(index, 'quantity', e.target.value)}
                         className="bg-surface-container-lowest border border-outline-variant rounded-xl px-3 py-2 text-xs focus:outline-none"
                       />
                     </div>

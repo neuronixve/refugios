@@ -280,6 +280,80 @@ async function initDb() {
         console.error("Error en migración de depósitos:", err);
       }
     })();
+
+    // Merge duplicate inventory items
+    await (async () => {
+      try {
+        console.log("Iniciando fusión de artículos duplicados en el inventario...");
+        await db.query(`
+          DO $$
+          DECLARE
+              r RECORD;
+              survivor_id INTEGER;
+              combined_qty NUMERIC(12,2);
+              min_val NUMERIC(12,2);
+              new_status VARCHAR(50);
+          BEGIN
+              -- Loop over groups of duplicates (same refugio_id, lowercase item_name, and deposito_id)
+              FOR r IN 
+                  SELECT refugio_id, LOWER(item_name) as clean_name, deposito_id, COUNT(*) as cnt
+                  FROM inventory
+                  GROUP BY refugio_id, LOWER(item_name), deposito_id
+                  HAVING COUNT(*) > 1
+              LOOP
+                  -- Find the survivor (smallest ID)
+                  SELECT id, min_threshold INTO survivor_id, min_val
+                  FROM inventory
+                  WHERE refugio_id = r.refugio_id AND LOWER(item_name) = r.clean_name AND (deposito_id = r.deposito_id OR (deposito_id IS NULL AND r.deposito_id IS NULL))
+                  ORDER BY id ASC
+                  LIMIT 1;
+
+                  -- Sum quantities of all duplicates
+                  SELECT SUM(quantity) INTO combined_qty
+                  FROM inventory
+                  WHERE refugio_id = r.refugio_id AND LOWER(item_name) = r.clean_name AND (deposito_id = r.deposito_id OR (deposito_id IS NULL AND r.deposito_id IS NULL));
+
+                  -- Update foreign keys in medication_deliveries
+                  UPDATE medication_deliveries 
+                  SET inventory_item_id = survivor_id 
+                  WHERE inventory_item_id IN (
+                      SELECT id FROM inventory 
+                      WHERE refugio_id = r.refugio_id AND LOWER(item_name) = r.clean_name AND (deposito_id = r.deposito_id OR (deposito_id IS NULL AND r.deposito_id IS NULL)) AND id <> survivor_id
+                  );
+
+                  -- Update foreign keys in inventory_movements
+                  UPDATE inventory_movements 
+                  SET inventory_id = survivor_id 
+                  WHERE inventory_id IN (
+                      SELECT id FROM inventory 
+                      WHERE refugio_id = r.refugio_id AND LOWER(item_name) = r.clean_name AND (deposito_id = r.deposito_id OR (deposito_id IS NULL AND r.deposito_id IS NULL)) AND id <> survivor_id
+                  );
+
+                  -- Update the survivor row
+                  new_status := CASE 
+                      WHEN combined_qty = 0 THEN 'Sin Stock'
+                      WHEN combined_qty <= min_val THEN 'Stock Crítico'
+                      ELSE 'Stock Suficiente'
+                  END;
+
+                  UPDATE inventory 
+                  SET quantity = combined_qty, status = new_status, updated_at = NOW() 
+                  WHERE id = survivor_id;
+
+                  -- Delete duplicate rows
+                  DELETE FROM inventory 
+                  WHERE refugio_id = r.refugio_id 
+                    AND LOWER(item_name) = r.clean_name 
+                    AND (deposito_id = r.deposito_id OR (deposito_id IS NULL AND r.deposito_id IS NULL)) 
+                    AND id <> survivor_id;
+              END LOOP;
+          END $$;
+        `);
+        console.log("Fusión de artículos duplicados completada exitosamente.");
+      } catch (err) {
+        console.error("Error al fusionar artículos duplicados:", err);
+      }
+    })();
     
     console.log('Migraciones dinámicas verificadas y aplicadas.');
   } catch (err) {
@@ -2239,28 +2313,66 @@ app.post('/api/refugios/:refugio_id/inventory', authenticateToken, denyMedicalGe
         });
       }
     } else {
-      result = await db.query(
-        `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id, units_per_package, sub_unit)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         RETURNING *`,
-        [parseInt(refugio_id), cleanItemName, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null, units_per_package || 1, sub_unit || null]
+      // Check if an item with the same name, category, and deposit already exists
+      const checkRes = await db.query(
+        `SELECT id, quantity, min_threshold FROM inventory 
+         WHERE refugio_id = $1 AND LOWER(item_name) = LOWER($2) AND category = $3 
+         AND (deposito_id = $4 OR (deposito_id IS NULL AND $4 IS NULL)) LIMIT 1`,
+        [parseInt(refugio_id), cleanItemName, category, deposito_id || null]
       );
-      const newId = result.rows[0].id;
-      const inventory_type = category === 'Alimentos' ? 'cocina' : (category === 'Medicinas' ? 'salud' : 'almacen');
-      await logInventoryMovement(db, {
-        refugio_id,
-        inventory_id: newId,
-        item_name: cleanItemName,
-        category,
-        deposito_id,
-        inventory_type,
-        movement_type: 'ajuste_manual',
-        quantity: qtyVal,
-        unit: unit || 'unidades',
-        user_id: req.user?.id,
-        user_name: req.user?.name,
-        details: `Registro inicial de insumo en inventario.`
-      });
+
+      if (checkRes.rows.length > 0) {
+        const existing = checkRes.rows[0];
+        const existingId = existing.id;
+        const newQty = (parseFloat(existing.quantity) || 0) + qtyVal;
+        const newStatus = newQty === 0 ? 'Sin Stock' : (newQty <= minVal ? 'Stock Crítico' : 'Stock Suficiente');
+
+        result = await db.query(
+          `UPDATE inventory 
+           SET quantity = $1, min_threshold = $2, unit = $3, status = $4, units_per_package = $5, sub_unit = $6, updated_at = NOW() 
+           WHERE id = $7 RETURNING *`,
+          [newQty, minVal, unit || 'unidades', newStatus, units_per_package || 1, sub_unit || null, existingId]
+        );
+
+        const inventory_type = category === 'Alimentos' ? 'cocina' : (category === 'Medicinas' ? 'salud' : 'almacen');
+        await logInventoryMovement(db, {
+          refugio_id,
+          inventory_id: existingId,
+          item_name: cleanItemName,
+          category,
+          deposito_id,
+          inventory_type,
+          movement_type: 'ajuste_manual',
+          quantity: qtyVal,
+          unit: unit || 'unidades',
+          user_id: req.user?.id,
+          user_name: req.user?.name,
+          details: `Registro de insumo duplicado. Se sumó la cantidad al registro existente.`
+        });
+      } else {
+        result = await db.query(
+          `INSERT INTO inventory (refugio_id, item_name, category, quantity, min_threshold, unit, status, deposito_id, units_per_package, sub_unit)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           RETURNING *`,
+          [parseInt(refugio_id), cleanItemName, category, qtyVal, minVal, unit || 'unidades', status, deposito_id || null, units_per_package || 1, sub_unit || null]
+        );
+        const newId = result.rows[0].id;
+        const inventory_type = category === 'Alimentos' ? 'cocina' : (category === 'Medicinas' ? 'salud' : 'almacen');
+        await logInventoryMovement(db, {
+          refugio_id,
+          inventory_id: newId,
+          item_name: cleanItemName,
+          category,
+          deposito_id,
+          inventory_type,
+          movement_type: 'ajuste_manual',
+          quantity: qtyVal,
+          unit: unit || 'unidades',
+          user_id: req.user?.id,
+          user_name: req.user?.name,
+          details: `Registro inicial de insumo en inventario.`
+        });
+      }
     }
     res.status(201).json(result.rows[0]);
   } catch (err) {

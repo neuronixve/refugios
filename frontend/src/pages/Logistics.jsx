@@ -449,7 +449,8 @@ export default function Logistics({ token }) {
                     value={donationQty} 
                     onChange={(e) => setDonationQty(e.target.value)} 
                     className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-2.5 text-xs focus:outline-none"
-                    min="1"
+                    min="0.01"
+                    step="0.01"
                     required
                   />
                 </div>
